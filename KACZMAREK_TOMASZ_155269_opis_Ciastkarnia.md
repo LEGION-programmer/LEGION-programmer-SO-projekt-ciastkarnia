@@ -101,6 +101,5 @@ Poniżej znajdują się testy wymagane do weryfikacji poprawności działania sy
 ---
 
 # Link do repozytorium GitHub  
-*(do uzupełnienia)*  
 **→ [https://github.com/LEGION-programmer/LEGION-programmer-SO-projekt-ciastkarnia/tree/main]()**
 
