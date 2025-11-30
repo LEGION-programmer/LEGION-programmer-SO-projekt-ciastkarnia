@@ -1,104 +1,193 @@
-# Temat 15 – Ciastkarnia  
-## Opis projektu
-
-Projekt polega na symulacji funkcjonowania ciastkarni składającej się z piekarni, samoobsługowego sklepu firmowego, stanowisk kasowych oraz kierownika. Symulacja musi być zrealizowana przy użyciu wielu procesów (`fork()`, `exec()`) oraz mechanizmów IPC: semaforów, pamięci dzielonej, kolejek komunikatów, potoków (FIFO/pipe) i sygnałów.
-
-## Założenia funkcjonalne
-
-- Produkowanych jest **P różnych produktów (P > 10)**, każdy trafia na osobny podajnik o pojemności **Kᵢ**.
-- Produkty są pobierane **FIFO**, w kolejności ułożenia przez piekarza.
-- Godziny pracy:
-  - piekarnia: **Tp → Tk**
-  - sklep: **Tp + 30 min → Tk**
-- W sklepie jednocześnie może przebywać maksymalnie **N klientów**.
-- Działają **2 stanowiska kasowe**, zawsze co najmniej jedno.
-- Na każde **K = N/2** klientów musi przypadać jedna czynna kasa.
-  - gdy liczba klientów < N/2 → druga kasa zostaje zamknięta (po obsłużeniu własnej kolejki).
-- Klienci przychodzą losowo, każdy z listą zakupów (min. 2 różne produkty).
-- Jeśli produkt jest niedostępny → klient go nie kupuje.
-- Kierownik może wysłać dwa sygnały:
-  - **Sygnał 1 – inwentaryzacja:** klienci kończą zakupy normalnie, po zamknięciu kasjerzy tworzą raport sprzedaży.
-  - **Sygnał 2 – ewakuacja:** klienci natychmiast opuszczają sklep i odkładają pobrany towar.
-- Raport końcowy zawiera:
-  - sprzedaż z kas,
-  - stan podajników,
-  - liczbę wyprodukowanych produktów.
-
-## Procesy w systemie
-
-W systemie funkcjonują procesy reprezentujące:
-- kierownika,
-- piekarza,
-- klientów (wielokrotne procesy),
-- kasjerów (co najmniej dwa procesy).
+# Projekt SO — Ciastkarnia  
+Autor: **Tomasz Kaczmarek, Nr albumu: 155269**  
+Temat: **Ciastkarnia**  
 
 ---
 
-# Testy funkcjonalne
+# 1. Opis symulacji
 
-Poniżej znajdują się testy wymagane do weryfikacji poprawności działania symulacji.
+Symulacja odwzorowuje pracę **ciastkarni z samoobsługowym sklepem**, w której jednocześnie działają:
 
----
+- **Piekarz(e)** – produkują *losową liczbę sztuk* różnych produktów (P > 10) i odkładają je na *podajniki*.  
+- **Klienci** – wchodzą do sklepu jeśli liczba osób < N; pobierają towary z podajników *w kolejności FIFO*, zgodnie z listą zakupów.  
+- **Kasjerzy (2 stanowiska)** – obsługują klientów, ale:  
+  - zawsze czynne jest minimum 1 stanowisko,  
+  - na każde K = N/2 klientów powinno przypadać minimum 1 czynna kasa,  
+  - kasę można zamknąć dopiero po obsłużeniu wszystkich oczekujących.  
+- **Kierownik** – generuje sygnały, zamyka sklep, robi inwentaryzację i zapisuje raport.
 
-## Test 1 – Limit klientów w sklepie
-**Cel:** sprawdzenie nieprzekraczania limitu N klientów.  
-**Przebieg:**
-1. Uruchomić wielu klientów przychodzących w krótkich odstępach.
-2. Weryfikować, że maksymalnie N klientów jest wewnątrz sklepu.
-3. Pozostali klienci powinni czekać przed wejściem.
+Wszystkie role działają jako **osobne procesy**, komunikujące się poprzez:
 
-**Oczekiwany wynik:** liczba klientów w sklepie nigdy nie przekracza N.
+- **pamięć dzieloną** – stan podajników, liczba klientów w sklepie, stan kas,
+- **semafory System V** – synchronizacja dostępu do podajników,
+- **kolejkę komunikatów** – zgłoszenia klientów do obsługi,
+- **sygnały** – inwentaryzacja i ewakuacja,
+- **pipe / FIFO** – centralne logowanie.
 
----
-
-## Test 2 – Automatyczne otwieranie i zamykanie kas
-**Cel:** weryfikacja logiki uruchamiania i zamykania kas.  
-**Przebieg:**
-1. Doprowadzić do sytuacji, w której liczba klientów przekracza N/2.
-2. Druga kasa powinna zostać otwarta.
-3. Następnie zmniejszyć liczbę klientów poniżej N/2.
-4. Kasa powinna zostać zamknięta dopiero po obsłudze bieżącej kolejki.
-
-**Oczekiwany wynik:** zachowanie kas zgodne z zasadami kierownika.
+System **nie stosuje scentralizowanego algorytmu**, procesy działają niezależnie.
 
 ---
 
-## Test 3 – Sygnał 2 (ewakuacja)
-**Cel:** sprawdzenie natychmiastowej reakcji systemu na ewakuację.  
-**Przebieg:**
-1. Uruchomić symulację z aktywnymi klientami.
-2. Wysłać sygnał ewakuacyjny.
-3. Klienci przerywają zakupy i wychodzą bez przechodzenia przez kasy.
+# 2. Szczegółowa rola procesów
 
-**Oczekiwany wynik:** brak deadlocków, klienci kończą procesy poprawnie, kasy kończą pracę.
-
----
-
-## Test 4 – Sygnał 1 (inwentaryzacja i raport)
-**Cel:** weryfikacja poprawności danych w raporcie końcowym.  
-**Przebieg:**
-1. Wysłać sygnał inwentaryzacji w trakcie symulacji.
-2. Pozwolić symulacji działać do zamknięcia sklepu.
-3. Po zamknięciu kasjerzy generują raporty sprzedaży.
-
-**Oczekiwany wynik:**
-- dane w raporcie zgodne z liczbą sprzedanych i pozostałych produktów,
-- brak niespójności między danymi piekarza i podajników.
+## **Piekarz**
+- Co określony losowy czas tworzy *losową liczbę sztuk* różnych produktów.  
+- Każdy produkt odkłada na swój **podajnik Pi**, ale **tylko do maksymalnej pojemności Ki**.
+- Dostęp do podajnika jest chroniony semaforem.
+- Na koniec raportuje, ile sztuk *każdego produktu* wyprodukował.
 
 ---
 
-## Test 5 – Poprawność FIFO i synchronizacji podajników
-**Cel:** sprawdzenie prawidłowego działania podajników i semaforów.  
-**Przebieg:**
-1. Ustawić małą pojemność podajników (małe Kᵢ).
-2. Wprowadzić wielu klientów pobierających produkty jednocześnie.
-
-**Oczekiwany wynik:**  
-- produkty wydawane w kolejności FIFO,  
-- brak nadpisywania lub utraty danych,  
-- poprawna synchronizacja dostępu multiprocessing.
+## **Klient**
+- Próbuje wejść do sklepu – jeśli jest już N klientów, czeka.  
+- Ma *losową listę zakupów* obejmującą co najmniej 2 różne produkty.  
+- Dla każdego produktu:  
+  - jeśli podajnik nie jest pusty → bierze towar,  
+  - jeśli brak → pomija pozycję.  
+- Po zakupach ustawia się w **kolejce do kas (FIFO)**.  
+- Oczekuje na obsługę przez kasjera.  
+- Po zapłacie opuszcza sklep.  
+- Zapisuje log swojej aktywności.
 
 ---
+
+## **Kasjer (2 stanowiska)**
+- Odbiera klientów z kolejki komunikatów.  
+- Obsługuje ich zgodnie z dynamiczną polityką kierownika:
+  - jeśli klientów < N/2 → jedna kasa zostaje zamknięta,
+  - jeśli klientów ≥ N/2 → obie są otwarte,
+  - zamknięcie kasy następuje dopiero po obsłużeniu klientów oczekujących w jej kolejce.
+- Po obsłudze zgłasza sprzedaż (ile sztuk każdego produktu).  
+- Na koniec przekazuje podsumowanie sprzedaży do kierownika.
+
+---
+
+## **Kierownik**
+- Obsługuje sygnały:
+  - `SIGUSR1` – *inwentaryzacja*, ale wykonywana **po zamknięciu sklepu**,
+  - `SIGUSR2` – *ewakuacja natychmiastowa*: klienci przerywają zakupy, odkładają pobrane towary do kosza i wychodzą bez płacenia,
+  - `SIGINT` – łagodne zakończenie pracy całego systemu.
+- Po zakończeniu pracy:
+  - zbiera informacje od piekarzy i kasjerów,
+  - sumuje pozostały towar na podajnikach,
+  - tworzy **raport końcowy** do pliku tekstowego,
+  - usuwa zasoby IPC.
+
+---
+
+# 3. Mechanizmy IPC użyte w projekcie
+
+| Mechanizm | Zastosowanie |
+|----------|--------------|
+| **Pamięć dzielona** | Podajniki, liczba klientów, stan kas |
+| **Semafory** | Ochrona dostępu do podajników |
+| **Kolejka komunikatów** | Klienci → kasjerzy |
+| **Pipe / FIFO** | Logowanie |
+| **Sygnały** | Inwentaryzacja i ewakuacja |
+| **Procesy** | Piekarz, klient, kasjer, kierownik, logger |
+
+---
+
+# 4. Parametry programu
+
+Uruchomienie:
+
+./ciastkarnia -P <piekarze> -N <maks. klienci> -K <pojemność podajników> -t <czas działania>
+
+shell
+Skopiuj kod
+
+### Przykład:
+
+./ciastkarnia -P 2 -N 20 -K 10 -t 60
+
+yaml
+Skopiuj kod
+
+Walidacja obejmuje:
+
+- czy parametry istnieją,  
+- czy są > 0,  
+- czy nie przekraczają logicznych limitów.
+
+---
+
+# 5. Kompilacja i uruchomienie
+
+### **Wymagane środowisko**
+Linux (Ubuntu/Debian):
+
+sudo apt install build-essential
+
+markdown
+Skopiuj kod
+
+### **Kompilacja**
+make
+
+markdown
+Skopiuj kod
+
+### **Uruchomienie**
+./ciastkarnia -P 2 -N 30 -K 10 -t 45
+
+markdown
+Skopiuj kod
+
+### **Czyszczenie**
+make clean
+
+yaml
+Skopiuj kod
+
+---
+
+# 6. Testy końcowe
+
+## **Test 1 – Normalna praca**
+20 klientów, 2 kasjerów, 1 piekarz.  
+
+**Oczekiwane:**  
+- brak deadlocków  
+- każdy klient obsłużony  
+- poprawne działanie FIFO kas  
+
+---
+
+## **Test 2 – Przepełnienie podajników**
+3 piekarzy, pojemność Ki = 5.  
+
+**Oczekiwane:**  
+- piekarze czekają, gdy podajnik pełny  
+- brak nadpisania pamięci  
+
+---
+
+## **Test 3 – Duże obciążenie kas**
+30 klientów, 3 piekarzy.  
+
+**Oczekiwane:**  
+- dynamiczne otwieranie i zamykanie kas  
+- brak blokad IPC  
+
+---
+
+## **Test 4 – Sygnały**
+Podczas działania:
+
+kill -USR1 <PID>
+kill -USR2 <PID>
+
+yaml
+Skopiuj kod
+
+**Oczekiwane:**  
+- prawidłowa inwentaryzacja  
+- natychmiastowa ewakuacja  
+- poprawne zwolnienie zasobów IPC  
+
+---
+
 
 # Link do repozytorium GitHub  
 **→ [https://github.com/LEGION-programmer/LEGION-programmer-SO-projekt-ciastkarnia/tree/main]()**
