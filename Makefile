@@ -1,57 +1,26 @@
-# ================================
-#   Projekt: Ciastkarnia
-#   Kompilacja i uruchamianie
-# ================================
-
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -I./src/include
-LDFLAGS = -pthread
 
-SRC_DIR = src
-BUILD_DIR = build
-LOG_DIR = logs
-
-SRC = $(wildcard $(SRC_DIR)/*.c) \
-      $(wildcard $(SRC_DIR)/utils/*.c)
-
-OBJ = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC)))
+SRC = src/main.c src/ciastkarnia.c src/ipc.c
+OBJ = $(patsubst src/%.c, build/%.o, $(SRC))
 
 TARGET = ciastkarnia
 
-# --------------------------------
-#  Reguła główna
-# --------------------------------
-all: prepare $(TARGET)
+all: build $(TARGET)
 
-# Tworzenie katalogów build/ i logs/
-prepare:
-	mkdir -p $(BUILD_DIR)
-	mkdir -p $(LOG_DIR)
+build:
+	mkdir -p build
+	mkdir -p logs
 
-# Kompilacja pliku wykonywalnego
+build/%.o: src/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(TARGET): $(OBJ)
-	$(CC) $(OBJ) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(OBJ) -o $(TARGET)
 
-# Kompilacja poszczególnych plików .c → .o
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/utils/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# --------------------------------
-#  Czyszczenie projektu
-# --------------------------------
 clean:
-	rm -rf $(BUILD_DIR)/*.o
+	rm -rf build
 	rm -f $(TARGET)
+	rm -rf logs
 
-# Usuwa również katalogi
-distclean: clean
-	rm -rf $(BUILD_DIR)
-	rm -rf $(LOG_DIR)
-
-run: all
-	./$(TARGET)
-
-.PHONY: all clean distclean prepare run
+.PHONY: all clean
