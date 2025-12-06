@@ -3,9 +3,19 @@
 
 #include <sys/types.h>
 
-// Funkcje dla magazynu i piekarza
-void init_magazyn(int pojemnosc);
-void piekarz_proc(int id);
-void cleanup_magazyn();
+// =======================
+// Struktury danych
+// =======================
+typedef struct {
+    int ciastka;    // liczba ciastek w magazynie
+    int max;        // pojemność magazynu
+    int klienci;    // liczba klientów w sklepie
+} shared_data_t;
 
-#endif // CIASTKARNIA_H
+// =======================
+// Funkcje IPC / magazyn
+// =======================
+void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn);
+void cleanup_shared_memory(int shm_id, shared_data_t *shm);
+
+#endif
