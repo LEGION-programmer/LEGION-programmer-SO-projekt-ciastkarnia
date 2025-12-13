@@ -1,75 +1,55 @@
-#define _POSIX_C_SOURCE 199309L
+#include "ciastkarnia.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>     // usleep, pause, fork
-#include <sys/types.h>  // pid_t
-#include <sys/wait.h>   // waitpid
-#include <signal.h>     // struct sigaction, sigaction, kill
-#include <string.h>     // memset
-#include "ciastkarnia.h"
-
-
-// Deklaracje funkcji procesów
-void proces_piekarz(int id, shared_data_t *shm);
-void proces_kasjer(int id);
-void proces_klient(int id);
-
-// Handler SIGINT
-void sigint_handler(int sig) {
-    (void)sig;
-    printf("\n[MAIN] Odebrano SIGINT – kończenie symulacji…\n");
-}
+#include <unistd.h>
+#include <sys/wait.h>
 
 int main() {
-    int P = 2, K = 2, C = 5, max_magazyn = 20;
+    int P = 2;
+    int K = 2;
+    int C = 5;
+    int max_magazyn = 20;
+
+    signal(SIGINT, sigint_handler);
+
     shared_data_t *shm;
-    int shm_id;
+    int shm_id = 0;
+    int semid = 0;
+
     init_shared_memory(&shm, &shm_id, max_magazyn);
+    semid = init_semaphore();
 
-    printf("=== START SYMULACJI CIASTKARNI ===\n");
-
-    pid_t dzieci[128];
+    pid_t dzieci[64];
     int dcount = 0;
 
-    // Piekarze
-    for (int i = 0; i < P; i++) {
-        pid_t pid = fork();
-        if (pid == 0) { proces_piekarz(i, shm); exit(0); }
-        dzieci[dcount++] = pid;
-    }
+    printf("=== START CIASTKARNI ===\n");
 
-    // Kasjerzy
-    for (int i = 0; i < K; i++) {
-        pid_t pid = fork();
-        if (pid == 0) { proces_kasjer(i); exit(0); }
-        dzieci[dcount++] = pid;
-    }
+    for (int i = 0; i < P; i++)
+        if ((dzieci[dcount++] = fork()) == 0)
+            proces_piekarz(i, shm, semid), exit(0);
 
-    // Klienci
-    for (int i = 0; i < C; i++) {
-        pid_t pid = fork();
-        if (pid == 0) { proces_klient(i); exit(0); }
-        dzieci[dcount++] = pid;
-    }
+    for (int i = 0; i < K; i++)
+        if ((dzieci[dcount++] = fork()) == 0)
+            proces_kasjer(i, shm, semid), exit(0);
 
-    // Obsługa SIGINT
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sigint_handler;
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(EXIT_FAILURE);
-    }
+    for (int i = 0; i < C; i++)
+        if ((dzieci[dcount++] = fork()) == 0)
+            proces_klient(i, shm, semid), exit(0);
 
-    printf("Wciśnij CTRL+C aby zakończyć...\n");
-    pause(); // czekamy na SIGINT
+    while (running)
+        pause();
 
-    printf("[MAIN] Zatrzymywanie procesów...\n");
-    for (int i = 0; i < dcount; i++) kill(dzieci[i], SIGINT);
-    for (int i = 0; i < dcount; i++) waitpid(dzieci[i], NULL, 0);
+    printf("\n[MAIN] Zamykanie ciastkarni...\n");
 
+    for (int i = 0; i < dcount; i++)
+        kill(dzieci[i], SIGINT);
+
+    for (int i = 0; i < dcount; i++)
+        waitpid(dzieci[i], NULL, 0);
+
+    cleanup_semaphore(semid);
     cleanup_shared_memory(shm_id, shm);
 
-    printf("=== KONIEC SYMULACJI ===\n");
+    printf("=== KONIEC ===\n");
     return 0;
 }
