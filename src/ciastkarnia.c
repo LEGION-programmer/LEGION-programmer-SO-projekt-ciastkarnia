@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <signal.h>
 
 volatile sig_atomic_t running = 1;
 
@@ -11,8 +12,7 @@ void sigint_handler(int sig) {
     running = 0;
 }
 
-/* ===== PAMIĘĆ DZIELONA ===== */
-
+// ===== SHARED MEMORY =====
 void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn) {
     *shm_id = shmget(IPC_PRIVATE, sizeof(shared_data_t), IPC_CREAT | 0660);
     if (*shm_id == -1) {
@@ -28,6 +28,7 @@ void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn) {
 
     (*shm)->ciastka = 0;
     (*shm)->max = max_magazyn;
+    (*shm)->klienci = 0;
 }
 
 void cleanup_shared_memory(int shm_id, shared_data_t *shm) {
@@ -35,8 +36,7 @@ void cleanup_shared_memory(int shm_id, shared_data_t *shm) {
     shmctl(shm_id, IPC_RMID, NULL);
 }
 
-/* ===== SEMAFOR ===== */
-
+// ===== SEMAPHORE =====
 int init_semaphore() {
     int semid = semget(IPC_PRIVATE, 1, IPC_CREAT | 0660);
     if (semid == -1) {
@@ -47,6 +47,12 @@ int init_semaphore() {
     return semid;
 }
 
-void cleanup_semaphore(int semid) {
-    semctl(semid, 0, IPC_RMID);
+void sem_lock(int semid) {
+    struct sembuf sb = {0, -1, 0};
+    semop(semid, &sb, 1);
+}
+
+void sem_unlock(int semid) {
+    struct sembuf sb = {0, 1, 0};
+    semop(semid, &sb, 1);
 }

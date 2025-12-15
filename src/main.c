@@ -1,55 +1,45 @@
-#include "ciastkarnia.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/wait.h>
+#include "ciastkarnia.h"
+
+shared_data_t *shm;
+int sem_magazyn;
+int sem_klienci;
+
+void proces_piekarz(int id);
+void proces_kasjer(int id);
+void proces_klient(int id, int limit);
 
 int main() {
-    int P = 2;
-    int K = 2;
-    int C = 5;
+    int P = 2, K = 2, C = 10;
     int max_magazyn = 20;
+    int limit_klientow = 5;
+
+    int shm_id;
+    init_shared_memory(&shm, &shm_id, max_magazyn);
+
+    sem_magazyn = init_semaphore();
+    sem_klienci = init_semaphore();
 
     signal(SIGINT, sigint_handler);
 
-    shared_data_t *shm;
-    int shm_id = 0;
-    int semid = 0;
-
-    init_shared_memory(&shm, &shm_id, max_magazyn);
-    semid = init_semaphore();
-
-    pid_t dzieci[64];
-    int dcount = 0;
-
-    printf("=== START CIASTKARNI ===\n");
+    pid_t pid;
 
     for (int i = 0; i < P; i++)
-        if ((dzieci[dcount++] = fork()) == 0)
-            proces_piekarz(i, shm, semid), exit(0);
+        if ((pid = fork()) == 0) proces_piekarz(i);
 
     for (int i = 0; i < K; i++)
-        if ((dzieci[dcount++] = fork()) == 0)
-            proces_kasjer(i, shm, semid), exit(0);
+        if ((pid = fork()) == 0) proces_kasjer(i);
 
     for (int i = 0; i < C; i++)
-        if ((dzieci[dcount++] = fork()) == 0)
-            proces_klient(i, shm, semid), exit(0);
+        if ((pid = fork()) == 0) proces_klient(i, limit_klientow);
 
-    while (running)
-        pause();
+    while (running) pause();
 
-    printf("\n[MAIN] Zamykanie ciastkarni...\n");
-
-    for (int i = 0; i < dcount; i++)
-        kill(dzieci[i], SIGINT);
-
-    for (int i = 0; i < dcount; i++)
-        waitpid(dzieci[i], NULL, 0);
-
-    cleanup_semaphore(semid);
+    printf("[MAIN] Zamykanie...\n");
     cleanup_shared_memory(shm_id, shm);
-
-    printf("=== KONIEC ===\n");
     return 0;
 }

@@ -1,25 +1,16 @@
 #include "ciastkarnia.h"
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/sem.h>
+#include <stdlib.h>
 
-static void sem_lock(int semid) {
-    struct sembuf op = {0, -1, 0};
-    semop(semid, &op, 1);
-}
+extern int sem_magazyn;
+extern int sem_klienci;
+extern shared_data_t *shm;
 
-static void sem_unlock(int semid) {
-    struct sembuf op = {0, 1, 0};
-    semop(semid, &op, 1);
-}
-
-/* ===== PIEKARZ ===== */
-
-void proces_piekarz(int id, shared_data_t *shm, int semid) {
-    signal(SIGINT, sigint_handler);
-
+// ===== PIEKARZ =====
+void proces_piekarz(int id) {
     while (running) {
-        sem_lock(semid);
+        sem_lock(sem_magazyn);
 
         if (shm->ciastka < shm->max) {
             shm->ciastka++;
@@ -27,48 +18,45 @@ void proces_piekarz(int id, shared_data_t *shm, int semid) {
                    id, shm->ciastka, shm->max);
         }
 
-        sem_unlock(semid);
+        sem_unlock(sem_magazyn);
+        sleep(1);
+    }
+    exit(0);
+}
+
+// ===== KASJER =====
+void proces_kasjer(int id) {
+    while (running) {
+        printf("[Kasjer %d] Czeka na klientów...\n", id);
+        sleep(2);
+    }
+    exit(0);
+}
+
+// ===== KLIENT =====
+void proces_klient(int id, int limit) {
+    while (running) {
+        sem_lock(sem_klienci);
+
+        if (shm->klienci < limit) {
+            shm->klienci++;
+            printf("[Klient %d] Wszedł do sklepu (%d/%d)\n",
+                   id, shm->klienci, limit);
+            sem_unlock(sem_klienci);
+            break;
+        }
+
+        sem_unlock(sem_klienci);
         sleep(1);
     }
 
-    printf("[Piekarz %d] Kończy pracę\n", id);
-}
+    sleep(2); // zakupy
 
-/* ===== KASJER ===== */
+    sem_lock(sem_klienci);
+    shm->klienci--;
+    printf("[Klient %d] Wyszedł ze sklepu (%d/%d)\n",
+           id, shm->klienci, limit);
+    sem_unlock(sem_klienci);
 
-void proces_kasjer(int id, shared_data_t *shm, int semid) {
-    signal(SIGINT, sigint_handler);
-
-    while (running) {
-        sem_lock(semid);
-
-        if (shm->ciastka > 0) {
-            shm->ciastka--;
-            printf("[Kasjer %d] Sprzedał ciastko (%d/%d)\n",
-                   id, shm->ciastka, shm->max);
-        }
-
-        sem_unlock(semid);
-        sleep(2);
-    }
-
-    printf("[Kasjer %d] Zamyka kasę\n", id);
-}
-
-/* ===== KLIENT ===== */
-
-void proces_klient(int id, shared_data_t *shm, int semid) {
-    signal(SIGINT, sigint_handler);
-
-    sem_lock(semid);
-
-    if (shm->ciastka > 0) {
-        shm->ciastka--;
-        printf("[Klient %d] Kupił ciastko (%d/%d)\n",
-               id, shm->ciastka, shm->max);
-    } else {
-        printf("[Klient %d] Brak ciastek – wychodzi\n", id);
-    }
-
-    sem_unlock(semid);
+    exit(0);
 }
