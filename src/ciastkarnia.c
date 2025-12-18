@@ -3,17 +3,24 @@
 #include <stdlib.h>
 #include <sys/shm.h>
 
-// globalny stan
+// =======================
+// Flaga globalna
+// =======================
 volatile sig_atomic_t running = 1;
 
+// =======================
+// SIGINT handler
+// =======================
 void sigint_handler(int sig) {
     (void)sig;
     running = 0;
-    printf("\n[INFO] Odebrano SIGINT – kończenie pracy...\n");
 }
 
+// =======================
+// Shared memory
+// =======================
 void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn) {
-    *shm_id = shmget(IPC_PRIVATE, sizeof(shared_data_t), IPC_CREAT | 0660);
+    *shm_id = shmget(IPC_PRIVATE, sizeof(shared_data_t), IPC_CREAT | 0666);
     if (*shm_id == -1) {
         perror("shmget");
         exit(EXIT_FAILURE);
@@ -27,7 +34,6 @@ void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn) {
 
     (*shm)->ciastka = 0;
     (*shm)->max = max_magazyn;
-    (*shm)->klienci = 0;
 }
 
 void cleanup_shared_memory(int shm_id, shared_data_t *shm) {

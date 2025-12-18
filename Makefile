@@ -1,13 +1,13 @@
 TARGET = ciastkarnia
 SRC_DIR = src
-INC_DIR = src/include
 BUILD_DIR = build
+INCLUDE_DIR = src/include
+
+CC = gcc
+CFLAGS = -Wall -Wextra -std=c11 -I$(INCLUDE_DIR)
 
 SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/ciastkarnia.c $(SRC_DIR)/procesy.c
 OBJS = $(BUILD_DIR)/main.o $(BUILD_DIR)/ciastkarnia.o $(BUILD_DIR)/procesy.o
-
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -I$(INC_DIR)
 
 all: $(TARGET)
 
