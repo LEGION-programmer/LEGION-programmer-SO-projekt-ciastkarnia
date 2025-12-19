@@ -2,38 +2,33 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
 
-
 int main() {
-    int P = 2;
-    int K = 2;
-    int C = 5;
-    int max_magazyn = 20;
+    signal(SIGINT, sigint_handler);
+
+    int P = 2, K = 1, C = 3;
+    int max_magazyn = 10;
 
     shared_data_t *shm;
-    int shm_id;
+    int shm_id = 0;
+    int semid = 0;
 
     init_shared_memory(&shm, &shm_id, max_magazyn);
-
-    // Prosta obsługa SIGINT
-    signal(SIGINT, sigint_handler);
+    semid = init_semaphore();
 
     pid_t dzieci[64];
     int dcount = 0;
 
-    printf("=== START SYMULACJI CIASTKARNI ===\n");
-
     for (int i = 0; i < P; i++) {
         if ((dzieci[dcount++] = fork()) == 0)
-            proces_piekarz(i, shm);
+            proces_piekarz(i, shm, semid);
     }
 
     for (int i = 0; i < K; i++) {
         if ((dzieci[dcount++] = fork()) == 0)
-            proces_kasjer(i);
+            proces_kasjer(i, shm, semid);
     }
 
     for (int i = 0; i < C; i++) {
@@ -41,11 +36,8 @@ int main() {
             proces_klient(i);
     }
 
-    // Główna pętla – czekamy na CTRL+C
     while (running)
-        sleep(1);
-
-    printf("\n[MAIN] Zamykanie procesów...\n");
+        pause();
 
     for (int i = 0; i < dcount; i++)
         kill(dzieci[i], SIGINT);
@@ -54,6 +46,7 @@ int main() {
         waitpid(dzieci[i], NULL, 0);
 
     cleanup_shared_memory(shm_id, shm);
+    remove_semaphore(semid);
 
     printf("=== KONIEC SYMULACJI ===\n");
     return 0;
