@@ -8,33 +8,30 @@
 int main() {
     signal(SIGINT, sigint_handler);
 
-    int P = 2, K = 1, C = 3;
+    int P = 2, K = 2, C = 5;
     int max_magazyn = 10;
 
     shared_data_t *shm;
-    int shm_id = 0;
-    int semid = 0;
+    int shm_id, semid, msgid;
 
     init_shared_memory(&shm, &shm_id, max_magazyn);
     semid = init_semaphore();
+    msgid = init_queue();
 
     pid_t dzieci[64];
     int dcount = 0;
 
-    for (int i = 0; i < P; i++) {
+    for (int i = 0; i < P; i++)
         if ((dzieci[dcount++] = fork()) == 0)
             proces_piekarz(i, shm, semid);
-    }
 
-    for (int i = 0; i < K; i++) {
+    for (int i = 0; i < K; i++)
         if ((dzieci[dcount++] = fork()) == 0)
-            proces_kasjer(i, shm, semid);
-    }
+            proces_kasjer(i, msgid);
 
-    for (int i = 0; i < C; i++) {
+    for (int i = 0; i < C; i++)
         if ((dzieci[dcount++] = fork()) == 0)
-            proces_klient(i);
-    }
+            proces_klient(i, msgid);
 
     while (running)
         pause();
@@ -47,6 +44,7 @@ int main() {
 
     cleanup_shared_memory(shm_id, shm);
     remove_semaphore(semid);
+    remove_queue(msgid);
 
     printf("=== KONIEC SYMULACJI ===\n");
     return 0;
