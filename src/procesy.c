@@ -1,45 +1,32 @@
 #include "ciastkarnia.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 void proces_piekarz(int id, shared_data_t *shm) {
     while (running) {
         if (shm->ciastka < shm->max) {
             shm->ciastka++;
-            printf("[Piekarz %d] Ciastko %d/%d\n",
+            printf("[Piekarz %d] wypiekł ciastko (%d/%d)\n",
                    id, shm->ciastka, shm->max);
         }
         sleep(1);
     }
-    exit(0);
+    printf("[Piekarz %d] kończy pracę\n", id);
 }
 
 void proces_kasjer(int id) {
     while (running) {
-        printf("[Kasjer %d] Czeka na klienta...\n", id);
+        printf("[Kasjer %d] czeka na klienta...\n", id);
         sleep(2);
     }
-    exit(0);
+    printf("[Kasjer %d] kończy pracę\n", id);
 }
 
 void proces_klient(int id) {
-    printf("[Klient %d] Wchodzi do sklepu\n", id);
-    sleep(1 + rand() % 3);
-    printf("[Klient %d] Wychodzi\n", id);
-    exit(0);
-}
+    if (!running) exit(0);
 
-void generator_klientow(void) {
-    int id = 0;
-    srand(getpid());
-
-    while (running) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            proces_klient(id++);
-        }
-        sleep(1 + rand() % 2);
-    }
-    exit(0);
+    printf("[Klient %d] wchodzi do sklepu\n", id);
+    sleep(1);
+    printf("[Klient %d] wychodzi ze sklepu\n", id);
 }

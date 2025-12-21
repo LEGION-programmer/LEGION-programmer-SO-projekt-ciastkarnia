@@ -8,7 +8,7 @@ volatile sig_atomic_t running = 1;
 void sigint_handler(int sig) {
     (void)sig;
     running = 0;
-    printf("\n[MAIN] SIGINT – kończę symulację\n");
+    printf("\n[MAIN] SIGINT – kończenie symulacji...\n");
 }
 
 void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn) {
