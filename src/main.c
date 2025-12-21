@@ -2,36 +2,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <signal.h>
+#include <sys/wait.h>
 
 int main() {
     signal(SIGINT, sigint_handler);
 
-    int P = 2, K = 2, C = 5;
-    int max_magazyn = 10;
+    int P = 2;
+    int K = 2;
+    int max_magazyn = 20;
 
     shared_data_t *shm;
-    int shm_id, semid, msgid;
-
+    int shm_id;
     init_shared_memory(&shm, &shm_id, max_magazyn);
-    semid = init_semaphore();
-    msgid = init_queue();
 
-    pid_t dzieci[64];
+    pid_t dzieci[32];
     int dcount = 0;
 
-    for (int i = 0; i < P; i++)
-        if ((dzieci[dcount++] = fork()) == 0)
-            proces_piekarz(i, shm, semid);
+    for (int i = 0; i < P; i++) {
+        if ((dzieci[dcount] = fork()) == 0)
+            proces_piekarz(i, shm);
+        dcount++;
+    }
 
-    for (int i = 0; i < K; i++)
-        if ((dzieci[dcount++] = fork()) == 0)
-            proces_kasjer(i, msgid);
+    for (int i = 0; i < K; i++) {
+        if ((dzieci[dcount] = fork()) == 0)
+            proces_kasjer(i);
+        dcount++;
+    }
 
-    for (int i = 0; i < C; i++)
-        if ((dzieci[dcount++] = fork()) == 0)
-            proces_klient(i, msgid);
+    if ((dzieci[dcount] = fork()) == 0)
+        generator_klientow();
+    dcount++;
 
     while (running)
         pause();
@@ -43,9 +45,6 @@ int main() {
         waitpid(dzieci[i], NULL, 0);
 
     cleanup_shared_memory(shm_id, shm);
-    remove_semaphore(semid);
-    remove_queue(msgid);
-
     printf("=== KONIEC SYMULACJI ===\n");
     return 0;
 }
