@@ -1,35 +1,26 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
 #include <sys/wait.h>
-#include <string.h>
-
+#include <signal.h>
 #include "ciastkarnia.h"
 
 int main() {
-    int P = 2; // piekarze
-    int K = 2; // kasjerzy
-    int C = 5; // klienci
+    int P = 2;   // piekarze
+    int K = 2;   // kasjerzy
+    int C = 5;   // klienci
     int max_magazyn = 20;
 
     shared_data_t *shm;
     int shm_id;
 
-    /* Obsługa SIGINT – MUSI być przed fork */
-    struct sigaction sa;
-    sa.sa_handler = sigint_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, NULL);
+    signal(SIGINT, sigint_handler);
 
     init_shared_memory(&shm, &shm_id, max_magazyn);
 
     printf("=== START SYMULACJI CIASTKARNI ===\n");
 
-    pid_t dzieci[128];
+    pid_t dzieci[64];
     int dcount = 0;
 
     /* Piekarze */
@@ -62,13 +53,10 @@ int main() {
         dzieci[dcount++] = pid;
     }
 
-    /* Główna pętla */
-    while (running) {
-        sleep(1);
-    }
+    printf("CTRL+C aby zakończyć symulację\n");
+    pause();
 
     printf("[MAIN] Zatrzymywanie procesów...\n");
-
     for (int i = 0; i < dcount; i++)
         kill(dzieci[i], SIGINT);
 

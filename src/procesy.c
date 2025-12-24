@@ -1,32 +1,35 @@
 #include "ciastkarnia.h"
 #include <stdio.h>
 #include <unistd.h>
-#include <stdlib.h>
+#include <signal.h>
 
+/* ===== PIEKARZ ===== */
 void proces_piekarz(int id, shared_data_t *shm) {
-    while (running) {
+    signal(SIGINT, SIG_DFL);
+
+    while (1) {
         if (shm->ciastka < shm->max) {
             shm->ciastka++;
-            printf("[Piekarz %d] wypiekł ciastko (%d/%d)\n",
+            printf("[Piekarz %d] Wypiekł ciastko (%d/%d)\n",
                    id, shm->ciastka, shm->max);
         }
         sleep(1);
     }
-    printf("[Piekarz %d] kończy pracę\n", id);
 }
 
+/* ===== KASJER ===== */
 void proces_kasjer(int id) {
-    while (running) {
-        printf("[Kasjer %d] czeka na klienta...\n", id);
+    signal(SIGINT, SIG_DFL);
+
+    while (1) {
+        printf("[Kasjer %d] Obsługuje klienta\n", id);
         sleep(2);
     }
-    printf("[Kasjer %d] kończy pracę\n", id);
 }
 
+/* ===== KLIENT ===== */
 void proces_klient(int id) {
-    if (!running) exit(0);
-
-    printf("[Klient %d] wchodzi do sklepu\n", id);
+    printf("[Klient %d] Wchodzi do sklepu\n", id);
     sleep(1);
-    printf("[Klient %d] wychodzi ze sklepu\n", id);
+    printf("[Klient %d] Wychodzi ze sklepu\n", id);
 }
