@@ -9,6 +9,12 @@ typedef struct {
     int max;
 } shared_data_t;
 
+/* ===== Kolejka komunikatów ===== */
+typedef struct {
+    long mtype;
+    int klient_id;
+} klient_msg_t;
+
 /* ===== IPC ===== */
 void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn);
 void cleanup_shared_memory(int shm_id, shared_data_t *shm);
@@ -17,10 +23,12 @@ int init_semaphores();
 void sem_down(int semid, int semnum);
 void sem_up(int semid, int semnum);
 
+int init_msg_queue();
+
 /* ===== Procesy ===== */
 void proces_piekarz(int id, shared_data_t *shm, int semid);
-void proces_kasjer(int id, shared_data_t *shm, int semid);
-void proces_klient(int id, shared_data_t *shm, int semid);
+void proces_kasjer(int id, shared_data_t *shm, int semid, int msgid);
+void proces_klient(int id, int msgid);
 
 /* ===== Sygnały ===== */
 void sigint_handler(int sig);

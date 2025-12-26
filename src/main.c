@@ -6,10 +6,7 @@
 #include "ciastkarnia.h"
 
 int main() {
-    int P = 2;
-    int K = 2;
-    int C = 5;
-    int max_magazyn = 20;
+    int P = 2, K = 2, C = 6, max_magazyn = 20;
 
     shared_data_t *shm;
     int shm_id;
@@ -18,8 +15,9 @@ int main() {
 
     init_shared_memory(&shm, &shm_id, max_magazyn);
     int semid = init_semaphores();
+    int msgid = init_msg_queue();
 
-    printf("=== START SYMULACJI CIASTKARNI ===\n");
+    printf("=== START CIASTKARNI ===\n");
 
     pid_t dzieci[64];
     int dcount = 0;
@@ -32,17 +30,16 @@ int main() {
 
     for (int i = 0; i < K; i++) {
         pid_t pid = fork();
-        if (pid == 0) proces_kasjer(i, shm, semid), exit(0);
+        if (pid == 0) proces_kasjer(i, shm, semid, msgid), exit(0);
         dzieci[dcount++] = pid;
     }
 
     for (int i = 0; i < C; i++) {
         pid_t pid = fork();
-        if (pid == 0) proces_klient(i, shm, semid), exit(0);
+        if (pid == 0) proces_klient(i, msgid), exit(0);
         dzieci[dcount++] = pid;
     }
 
-    printf("CTRL+C aby zakończyć symulację\n");
     pause();
 
     for (int i = 0; i < dcount; i++)
@@ -53,6 +50,6 @@ int main() {
 
     cleanup_shared_memory(shm_id, shm);
 
-    printf("=== KONIEC SYMULACJI ===\n");
+    printf("=== KONIEC ===\n");
     return 0;
 }

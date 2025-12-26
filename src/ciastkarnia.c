@@ -3,12 +3,13 @@
 #include <stdlib.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
 #include <signal.h>
 
 /* ===== SIGINT ===== */
 void sigint_handler(int sig) {
     (void)sig;
-    printf("\n[MAIN] Odebrano SIGINT – kończę symulację...\n");
+    printf("\n[MAIN] Zatrzymanie symulacji...\n");
 }
 
 /* ===== Pamięć dzielona ===== */
@@ -37,14 +38,8 @@ void cleanup_shared_memory(int shm_id, shared_data_t *shm) {
 /* ===== Semafory ===== */
 int init_semaphores() {
     int semid = semget(IPC_PRIVATE, 2, IPC_CREAT | 0666);
-    if (semid == -1) {
-        perror("semget");
-        exit(EXIT_FAILURE);
-    }
-
     semctl(semid, 0, SETVAL, 1); // mutex
     semctl(semid, 1, SETVAL, 0); // liczba ciastek
-
     return semid;
 }
 
@@ -56,4 +51,14 @@ void sem_down(int semid, int semnum) {
 void sem_up(int semid, int semnum) {
     struct sembuf op = { semnum, 1, 0 };
     semop(semid, &op, 1);
+}
+
+/* ===== Kolejka komunikatów ===== */
+int init_msg_queue() {
+    int msgid = msgget(IPC_PRIVATE, IPC_CREAT | 0666);
+    if (msgid == -1) {
+        perror("msgget");
+        exit(EXIT_FAILURE);
+    }
+    return msgid;
 }
