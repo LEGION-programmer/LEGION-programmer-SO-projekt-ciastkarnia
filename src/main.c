@@ -4,60 +4,52 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <string.h>
 #include <signal.h>
+#include <string.h>
 
 #include "ciastkarnia.h"
 
 int main() {
-    int P = 2;
-    int K = 2;
-    int C = 5;
-    int max_magazyn = 20;
+    int P = 2, K = 2, C = 6;
+    int max_magazyn = 10;
 
     shared_data_t *shm;
-    int shm_id;
+    int shm_id = 0;
+    int semid = 0;
 
     init_shared_memory(&shm, &shm_id, max_magazyn);
+    semid = init_semaphore();
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sigint_handler;
     sigaction(SIGINT, &sa, NULL);
 
-    printf("=== START CIASTKARNI ===\n");
-    printf("CTRL+C aby zakończyć\n");
+    printf("=== START CIASTKARNI === (CTRL+C kończy)\n");
 
-    pid_t dzieci[128];
-    int dcount = 0;
+    pid_t pid;
 
-    for (int i = 0; i < P; i++) {
-        pid_t pid = fork();
-        if (pid == 0) proces_piekarz(i, shm);
-        dzieci[dcount++] = pid;
-    }
+    for (int i = 0; i < P; i++)
+        if ((pid = fork()) == 0)
+            proces_piekarz(i, shm, semid);
 
-    for (int i = 0; i < K; i++) {
-        pid_t pid = fork();
-        if (pid == 0) proces_kasjer(i);
-        dzieci[dcount++] = pid;
-    }
+    for (int i = 0; i < K; i++)
+        if ((pid = fork()) == 0)
+            proces_kasjer(i);
 
     for (int i = 0; i < C; i++) {
-        pid_t pid = fork();
-        if (pid == 0) proces_klient(i);
-        dzieci[dcount++] = pid;
+        sleep(1);
+        if ((pid = fork()) == 0)
+            proces_klient(i, shm, semid);
     }
 
-    while (running) pause();
+    while (running)
+        pause();
 
-    printf("\n[MAIN] Zamykanie procesów...\n");
+    printf("\n[MAIN] Zamykanie symulacji...\n");
 
-    for (int i = 0; i < dcount; i++)
-        waitpid(dzieci[i], NULL, 0);
-
+    while (wait(NULL) > 0);
     cleanup_shared_memory(shm_id, shm);
 
-    printf("[MAIN] KONIEC SYMULACJI\n");
     return 0;
 }
