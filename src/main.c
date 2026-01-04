@@ -8,7 +8,6 @@
 #include <string.h>
 #include <sys/msg.h>
 
-
 #include "ciastkarnia.h"
 
 int main() {
@@ -22,7 +21,8 @@ int main() {
     semid = init_semaphore();
     msgid = init_queue();
 
-    struct sigaction sa = {0};
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sigint_handler;
     sigaction(SIGINT, &sa, NULL);
 
@@ -45,11 +45,14 @@ int main() {
     while (running)
         pause();
 
-    printf("\n[MAIN] Zamykanie...\n");
+    printf("\n[MAIN] Zamykanie symulacji...\n");
+
     while (wait(NULL) > 0);
 
     cleanup_shared_memory(shm_id, shm);
+    cleanup_semaphore(semid);
     msgctl(msgid, IPC_RMID, NULL);
 
+    printf("=== CIASTKARNIA ZAMKNIĘTA ===\n");
     return 0;
 }

@@ -14,7 +14,7 @@ typedef struct {
 
 /* ===== WIADOMOŚĆ KLIENTA ===== */
 typedef struct {
-    long mtype;     // zawsze 1 (FIFO)
+    long mtype;
     int client_id;
 } client_msg_t;
 
@@ -29,6 +29,7 @@ void cleanup_shared_memory(int shm_id, shared_data_t *shm);
 int init_semaphore();
 void sem_down(int semid);
 void sem_up(int semid);
+void cleanup_semaphore(int semid);
 
 int init_queue();
 
