@@ -1,11 +1,10 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "ciastkarnia.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
+#include <stdlib.h>
 
 volatile sig_atomic_t running = 1;
 
@@ -15,21 +14,13 @@ void sigint_handler(int sig) {
 }
 
 /* ===== SHM ===== */
-void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn) {
+void init_shared_memory(shared_data_t **shm, int *shm_id, int max_magazyn, int klienci) {
     *shm_id = shmget(IPC_PRIVATE, sizeof(shared_data_t), IPC_CREAT | 0660);
-    if (*shm_id == -1) {
-        perror("shmget");
-        exit(1);
-    }
-
     *shm = shmat(*shm_id, NULL, 0);
-    if (*shm == (void *)-1) {
-        perror("shmat");
-        exit(1);
-    }
 
     (*shm)->ciastka = 0;
     (*shm)->max = max_magazyn;
+    (*shm)->klienci_pozostali = klienci;
 }
 
 void cleanup_shared_memory(int shm_id, shared_data_t *shm) {
@@ -37,37 +28,28 @@ void cleanup_shared_memory(int shm_id, shared_data_t *shm) {
     shmctl(shm_id, IPC_RMID, NULL);
 }
 
-/* ===== SEMAFOR ===== */
-int init_semaphore() {
-    int semid = semget(IPC_PRIVATE, 1, IPC_CREAT | 0660);
-    if (semid == -1) {
-        perror("semget");
-        exit(1);
-    }
+/* ===== SEMAFORY =====
+   0 – mutex
+   1 – limit klientów
+*/
+int init_semaphores(int max_klientow) {
+    int semid = semget(IPC_PRIVATE, 2, IPC_CREAT | 0660);
     semctl(semid, 0, SETVAL, 1);
+    semctl(semid, 1, SETVAL, max_klientow);
     return semid;
 }
 
-void sem_down(int semid) {
-    struct sembuf sb = {0, -1, 0};
+void sem_down(int semid, int num) {
+    struct sembuf sb = {num, -1, 0};
     semop(semid, &sb, 1);
 }
 
-void sem_up(int semid) {
-    struct sembuf sb = {0, 1, 0};
+void sem_up(int semid, int num) {
+    struct sembuf sb = {num, 1, 0};
     semop(semid, &sb, 1);
-}
-
-void cleanup_semaphore(int semid) {
-    semctl(semid, 0, IPC_RMID);
 }
 
 /* ===== KOLEJKA ===== */
 int init_queue() {
-    int msgid = msgget(IPC_PRIVATE, IPC_CREAT | 0660);
-    if (msgid == -1) {
-        perror("msgget");
-        exit(1);
-    }
-    return msgid;
+    return msgget(IPC_PRIVATE, IPC_CREAT | 0660);
 }
