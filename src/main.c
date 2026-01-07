@@ -1,5 +1,4 @@
-#define _POSIX_C_SOURCE 200809L
-
+#include "ciastkarnia.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -7,17 +6,23 @@
 #include <sys/wait.h>
 #include <sys/msg.h>
 
-#include "ciastkarnia.h"
+pid_t dzieci[32];
+int dcount = 0;
+
+void sigint_handler(int sig) {
+    printf("\n[MAIN] Kończenie symulacji...\n");
+    for (int i = 0; i < dcount; i++)
+        kill(dzieci[i], SIGTERM);
+}
 
 int main() {
-    int P = 2, K = 2, C = 12;
-    int max_magazyn = 10;
-    int max_klientow = 4;
+    int P = 2, K = 2, C = 20;
+    int max_ciasta = 10;
 
     shared_data_t *shm;
-    int shm_id, semid, msgid;
+    int shmid, semid, msgid;
 
-    init_shared_memory(&shm, &shm_id, max_magazyn, max_klientow);
+    init_shared_memory(&shm, &shmid, max_ciasta);
     semid = init_semaphore();
     msgid = init_queue();
 
@@ -25,34 +30,39 @@ int main() {
     sa.sa_handler = sigint_handler;
     sigaction(SIGINT, &sa, NULL);
 
-    printf("=== START CIASTKARNI (CTRL+C) ===\n");
+    printf("=== CIASTKARNIA START ===\n");
 
-    for (int i = 0; i < P; i++)
-        if (fork() == 0)
-            proces_piekarz(i, shm, semid);
-
-    for (int i = 0; i < K; i++)
-        if (fork() == 0)
-            proces_kasjer(i, shm, semid, msgid);
-
-    for (int i = 0; i < C; i++) {
-        sleep(1);
-        if (fork() == 0)
-            proces_klient(i, shm, semid, msgid);
+    for (int i = 0; i < P; i++) {
+        pid_t p = fork();
+        if (p == 0) proces_piekarz(i, shm, semid);
+        dzieci[dcount++] = p;
     }
 
-    while (running)
-        pause();
+    for (int i = 0; i < K; i++) {
+        pid_t p = fork();
+        if (p == 0) proces_kasjer(i, shm, semid, msgid);
+        dzieci[dcount++] = p;
+    }
+
+    for (int i = 0; i < C; i++) {
+        sem_down(semid);
+        shm->klienci_przyszli++;
+        shm->kolejka++;
+        sem_up(semid);
+
+        pid_t p = fork();
+        if (p == 0) proces_klient(i, msgid);
+        sleep(1);
+    }
 
     while (wait(NULL) > 0);
 
-    printf("\n=== RAPORT KOŃCOWY ===\n");
-    printf("Wyprodukowano: %d\n", shm->wyprodukowane);
-    printf("Sprzedano:     %d\n", shm->sprzedane);
-    printf("Obsłużono:     %d klientów\n", shm->obsluzeni_klienci);
-    printf("Pozostało:     %d\n", shm->ciastka);
+    printf("\n=== STATYSTYKA ===\n");
+    printf("Klienci przyszli: %d\n", shm->klienci_przyszli);
+    printf("Klienci obsłużeni: %d\n", shm->klienci_obsluzeni);
+    printf("Sprzedane ciastka: %d\n", shm->sprzedane_ciasta);
 
-    cleanup_shared_memory(shm_id, shm);
+    cleanup_shared_memory(shmid, shm);
     msgctl(msgid, IPC_RMID, NULL);
 
     return 0;

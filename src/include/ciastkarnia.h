@@ -3,37 +3,31 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#include <sys/types.h>
 #include <signal.h>
 
-/* ===== DANE WSPÓLNE ===== */
+/* ===== SHARED MEMORY ===== */
 typedef struct {
     int ciastka;
-    int max;
+    int max_ciasta;
 
-    int wyprodukowane;
-    int sprzedane;
+    int kolejka;
 
-    int klienci_w_sklepie;
-    int max_klientow;
-
-    int obsluzeni_klienci;
+    int klienci_przyszli;
+    int klienci_obsluzeni;
+    int sprzedane_ciasta;
 } shared_data_t;
 
-/* ===== WIADOMOŚĆ KLIENTA ===== */
+/* ===== MESSAGE ===== */
 typedef struct {
     long mtype;
     int client_id;
     int ile_chce;
 } client_msg_t;
 
-/* ===== STEROWANIE ===== */
-extern volatile sig_atomic_t running;
-void sigint_handler(int sig);
-
 /* ===== IPC ===== */
-void init_shared_memory(shared_data_t **shm, int *shm_id,
-                        int max_magazyn, int max_klientow);
-void cleanup_shared_memory(int shm_id, shared_data_t *shm);
+void init_shared_memory(shared_data_t **shm, int *shmid, int max);
+void cleanup_shared_memory(int shmid, shared_data_t *shm);
 
 int init_semaphore();
 void sem_down(int semid);
@@ -44,6 +38,9 @@ int init_queue();
 /* ===== PROCESY ===== */
 void proces_piekarz(int id, shared_data_t *shm, int semid);
 void proces_kasjer(int id, shared_data_t *shm, int semid, int msgid);
-void proces_klient(int id, shared_data_t *shm, int semid, int msgid);
+void proces_klient(int id, int msgid);
+
+/* ===== SIGNAL ===== */
+void sigint_handler(int sig);
 
 #endif
