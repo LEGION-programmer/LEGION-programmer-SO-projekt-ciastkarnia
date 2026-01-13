@@ -1,30 +1,34 @@
-CC      = gcc
-CFLAGS  = -Wall -Wextra -std=c11 -O2 -pthread
-# Tutaj wskazujemy folder z plikami .h
-INCLUDE = -Isrc/include
+# Ustawienia kompilatora
+CC = gcc
+CFLAGS = -Wall -Wextra -Isrc/include
+LDFLAGS = 
 
-SRC_DIR = src
-OBJ_DIR = build
-BIN     = ciastkarnia
+# Lista programów do zbudowania
+TARGETS = kierownik piekarz kasjer klient
 
-SRC = $(SRC_DIR)/main.c \
-      $(SRC_DIR)/ciastkarnia.c \
-      $(SRC_DIR)/procesy.c \
-      $(SRC_DIR)/ipc.c
+# Domyślna reguła (wywoływana przez wpisanie 'make')
+all: $(TARGETS)
 
-OBJ = $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+# Kompilacja Kierownika
+kierownik: src/kierownik.c
+	$(CC) $(CFLAGS) src/kierownik.c -o kierownik
 
-all: $(BIN)
+# Kompilacja Piekarza
+piekarz: src/piekarz.c
+	$(CC) $(CFLAGS) src/piekarz.c -o piekarz
 
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
+# Kompilacja Kasjera
+kasjer: src/kasjer.c
+	$(CC) $(CFLAGS) src/kasjer.c -o kasjer
 
-# Dodałem $(INCLUDE) tutaj, żeby widział pliki .h
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
+# Kompilacja Klienta
+klient: src/klient.c
+	$(CC) $(CFLAGS) src/klient.c -o klient
 
-$(BIN): $(OBJ)
-	$(CC) $(CFLAGS) $(OBJ) -o $(BIN)
-
+# Czyszczenie plików binarnych (wywoływane przez 'make clean')
 clean:
-	rm -rf $(OBJ_DIR) $(BIN)
+	rm -f $(TARGETS)
+	@echo "Pliki binarne usunięte."
+
+# Reguła zapobiegająca problemom z plikami o nazwach takich jak reguły
+.PHONY: all clean

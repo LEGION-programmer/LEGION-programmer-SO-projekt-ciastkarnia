@@ -1,0 +1,13 @@
+RAPORT KOŃCOWY
+
+Paczek: Wytworzono 2, Sprzedano 0
+Kremowka: Wytworzono 2, Sprzedano 0
+WZ-tka: Wytworzono 2, Sprzedano 0
+Sernik: Wytworzono 2, Sprzedano 0
+Makowiec: Wytworzono 2, Sprzedano 0
+Ekler: Wytworzono 1, Sprzedano 0
+Mazurek: Wytworzono 3, Sprzedano 2
+Drozdżowka: Wytworzono 2, Sprzedano 0
+Beza: Wytworzono 1, Sprzedano 0
+Tarta: Wytworzono 1, Sprzedano 0
+Szarlotka: Wytworzono 2, Sprzedano 1
