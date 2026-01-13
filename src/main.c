@@ -2,68 +2,64 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
+#include <time.h>
 #include <sys/wait.h>
-#include <sys/msg.h>
 
-pid_t dzieci[32];
-int dcount = 0;
-
-void sigint_handler(int sig) {
-    printf("\n[MAIN] Kończenie symulacji...\n");
-    for (int i = 0; i < dcount; i++)
-        kill(dzieci[i], SIGTERM);
+void sigint_main(int sig) {
+    (void)sig;
+    running = 0;
 }
 
 int main() {
-    int P = 2, K = 2, C = 20;
-    int max_ciasta = 10;
+    printf("[System] Otwieramy ciastkarnię...\n");
+    signal(SIGINT, sigint_main);
+    shared_data_t *shm = init_shared_memory();
 
-    shared_data_t *shm;
-    int shmid, semid, msgid;
-
-    init_shared_memory(&shm, &shmid, max_ciasta);
-    semid = init_semaphore();
-    msgid = init_queue();
-
-    struct sigaction sa = {0};
-    sa.sa_handler = sigint_handler;
-    sigaction(SIGINT, &sa, NULL);
-
-    printf("=== CIASTKARNIA START ===\n");
-
-    for (int i = 0; i < P; i++) {
-        pid_t p = fork();
-        if (p == 0) proces_piekarz(i, shm, semid);
-        dzieci[dcount++] = p;
+    // 1. Uruchomienie piekarzy
+    pid_t piekarze[2];
+    for (int i = 0; i < 2; i++) {
+        if ((piekarze[i] = fork()) == 0) {
+            srand(time(NULL) ^ (getpid() << 1));
+            proces_piekarz(i, shm);
+            exit(0);
+        }
     }
 
-    for (int i = 0; i < K; i++) {
-        pid_t p = fork();
-        if (p == 0) proces_kasjer(i, shm, semid, msgid);
-        dzieci[dcount++] = p;
+    // 2. Uruchomienie kasjera
+    pid_t kasjer = fork();
+    if (kasjer == 0) {
+        proces_kasjer(0, shm);
+        exit(0);
     }
 
-    for (int i = 0; i < C; i++) {
-        sem_down(semid);
-        shm->klienci_przyszli++;
-        shm->kolejka++;
-        sem_up(semid);
-
-        pid_t p = fork();
-        if (p == 0) proces_klient(i, msgid);
-        sleep(1);
+    // 3. Generowanie klientów w odstępach czasu
+    srand(time(NULL));
+    for (int i = 0; i < MAX_KLIENCI && running; i++) {
+        int ile = (rand() % 3) + 1;
+        if (fork() == 0) {
+            srand(time(NULL) ^ (getpid() << 1));
+            proces_klient(i, shm, ile);
+            exit(0);
+        }
+        // Nowy klient pojawia się co 1-2 sekundy
+        usleep((rand() % 1000 + 1000) * 1000); 
     }
 
+    // Czekamy, aż wszyscy klienci z kolejki zostaną obsłużeni
+    while (shm->klienci_obsluzeni < shm->klienci_przyszli) {
+        usleep(500000);
+    }
+
+    printf("\n[System] Brak nowych klientów. Zamykamy lokal...\n");
+    running = 0; // Zatrzymuje pętle piekarzy i kasjera
+
+    // Sprzątanie procesów
+    for (int i = 0; i < 2; i++) waitpid(piekarze[i], NULL, 0);
+    waitpid(kasjer, NULL, 0);
     while (wait(NULL) > 0);
 
-    printf("\n=== STATYSTYKA ===\n");
-    printf("Klienci przyszli: %d\n", shm->klienci_przyszli);
-    printf("Klienci obsłużeni: %d\n", shm->klienci_obsluzeni);
-    printf("Sprzedane ciastka: %d\n", shm->sprzedane_ciasta);
-
-    cleanup_shared_memory(shmid, shm);
-    msgctl(msgid, IPC_RMID, NULL);
+    print_stats(shm);
+    cleanup_shared_memory(shm);
 
     return 0;
 }

@@ -1,24 +1,30 @@
-TARGET = ciastkarnia
+CC      = gcc
+CFLAGS  = -Wall -Wextra -std=c11 -O2 -pthread
+# Tutaj wskazujemy folder z plikami .h
+INCLUDE = -Isrc/include
+
 SRC_DIR = src
-BUILD_DIR = build
-INCLUDE_DIR = src/include
+OBJ_DIR = build
+BIN     = ciastkarnia
 
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -I$(INCLUDE_DIR)
+SRC = $(SRC_DIR)/main.c \
+      $(SRC_DIR)/ciastkarnia.c \
+      $(SRC_DIR)/procesy.c \
+      $(SRC_DIR)/ipc.c
 
-SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/ciastkarnia.c $(SRC_DIR)/procesy.c
-OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+OBJ = $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
-all: $(TARGET)
+all: $(BIN)
 
-$(TARGET): $(OBJS)
-	$(CC) $(OBJS) -o $(TARGET)
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	mkdir -p $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+# Dodałem $(INCLUDE) tutaj, żeby widział pliki .h
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
+
+$(BIN): $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $(BIN)
 
 clean:
-	rm -rf build $(TARGET)
-
-.PHONY: all clean
+	rm -rf $(OBJ_DIR) $(BIN)

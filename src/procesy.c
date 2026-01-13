@@ -1,79 +1,60 @@
+#define _DEFAULT_SOURCE
 #include "ciastkarnia.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <sys/msg.h>
-#include <time.h>
 
-/* ===== PIEKARZ ===== */
-void proces_piekarz(int id, shared_data_t *shm, int semid) {
-    signal(SIGTERM, SIG_DFL);
+extern volatile sig_atomic_t running;
 
-    while (1) {
-        sem_down(semid);
-        if (shm->ciastka < shm->max_ciasta) {
-            shm->ciastka++;
-            printf("[Piekarz %d] +1 (%d/%d)\n",
-                   id, shm->ciastka, shm->max_ciasta);
+void proces_piekarz(int id, shared_data_t *shm) {
+    while (running) {
+        // Pieczenie trwa od 1 do 2 sekund
+        usleep((rand() % 1000 + 1000) * 1000); 
+        
+        pthread_mutex_lock(&shm->mutex);
+        if (shm->magazyn < MAX_MAGAZYN) {
+            shm->magazyn++;
+            printf("[Piekarz %d] Upiekł ciastko. Stan: %d/%d\n", id, shm->magazyn, MAX_MAGAZYN);
+            fflush(stdout);
         }
-        sem_up(semid);
-        sleep(1);
+        pthread_mutex_unlock(&shm->mutex);
     }
+    printf("[Piekarz %d] Kończy zmianę i wychodzi.\n", id);
 }
 
-/* ===== KASJER ===== */
-void proces_kasjer(int id, shared_data_t *shm, int semid, int msgid) {
-    signal(SIGTERM, SIG_DFL);
-
-    client_msg_t msg;
-
-    while (1) {
-        /* kasjer 2 tylko gdy kolejka >= 3 */
-        if (id == 1) {
-            sem_down(semid);
-            int aktywny = (shm->kolejka >= 3);
-            sem_up(semid);
-            if (!aktywny) {
-                sleep(1);
-                continue;
-            }
-        }
-
-        if (msgrcv(msgid, &msg, sizeof(client_msg_t) - sizeof(long), 1, 0) < 0)
-            continue;
-
-        sem_down(semid);
-        shm->kolejka--;
-
-        while (shm->ciastka < msg.ile_chce) {
-            sem_up(semid);
-            sleep(1);
-            sem_down(semid);
-        }
-
-        shm->ciastka -= msg.ile_chce;
-        shm->sprzedane_ciasta += msg.ile_chce;
-        shm->klienci_obsluzeni++;
-
-        printf("[Kasjer %d] klient %d kupił %d (zostało %d)\n",
-               id, msg.client_id, msg.ile_chce, shm->ciastka);
-
-        sem_up(semid);
-        sleep(1);
+void proces_kasjer(int id, shared_data_t *shm) {
+    (void)id; 
+    while (running || shm->klienci_obsluzeni < shm->klienci_przyszli) {
+        // Kasjer po prostu monitoruje sklep co pół sekundy
+        usleep(500000);
     }
+    printf("[System] Kasjer zamknął kasę.\n");
 }
 
-/* ===== KLIENT ===== */
-void proces_klient(int id, int msgid) {
-    srand(getpid());
+void proces_klient(int id, shared_data_t *shm, int ile) {
+    pthread_mutex_lock(&shm->mutex);
+    shm->klienci_przyszli++;
+    pthread_mutex_unlock(&shm->mutex);
 
-    client_msg_t msg;
-    msg.mtype = 1;
-    msg.client_id = id;
-    msg.ile_chce = (rand() % 3) + 1;
+    printf("--> [Klient %2d] Wchodzi, chce kupić: %d\n", id, ile);
+    fflush(stdout);
 
-    printf("[Klient %d] chce %d ciastek\n", id, msg.ile_chce);
-    msgsnd(msgid, &msg, sizeof(client_msg_t) - sizeof(long), 0);
-
-    _exit(0);
+    int kupione = 0;
+    while (running && !kupione) {
+        pthread_mutex_lock(&shm->mutex);
+        if (shm->magazyn >= ile) {
+            shm->magazyn -= ile;
+            shm->klienci_obsluzeni++;
+            shm->sprzedane_ciastka += ile;
+            printf("<-- [Kasjer] Sprzedano %d ciastek klientowi %d. Zostało: %d\n", ile, id, shm->magazyn);
+            fflush(stdout);
+            kupione = 1;
+        }
+        pthread_mutex_unlock(&shm->mutex);
+        
+        if (!kupione) {
+            // Jeśli nie ma towaru, klient czeka cierpliwie 1.5 sekundy
+            usleep(1500000); 
+        }
+    }
 }
