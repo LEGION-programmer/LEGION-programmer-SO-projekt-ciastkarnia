@@ -1,194 +1,107 @@
-# Projekt SO — Ciastkarnia  
-Autor: **Tomasz Kaczmarek, Nr albumu: 155269**  
-Temat: **Ciastkarnia**  
+# Projekt SO — Ciastkarnia 
+**Autor:** Tomasz Kaczmarek  
+**Nr albumu:** 155269  
+**Temat:** Wieloprocesowa symulacja ciastkarni z wykorzystaniem mechanizmów IPC System V  
 
 ---
 
-# 1. Opis symulacji
+## 1. Opis symulacji
 
-Symulacja odwzorowuje pracę **ciastkarni z samoobsługowym sklepem**, w której jednocześnie działają:
+Symulacja odwzorowuje pracę **ciastkarni z samoobsługowym sklepem**, w której niezależne procesy współpracują w czasie rzeczywistym bez scentralizowanego zarządcy. System demonstruje rozwiązanie klasycznego problemu "Producenta i Konsumenta" w środowisku wieloprocesowym.
 
-- **Piekarz(e)** – produkują *losową liczbę sztuk* różnych produktów (P > 10) i odkładają je na *podajniki*.  
-- **Klienci** – wchodzą do sklepu jeśli liczba osób < N; pobierają towary z podajników *w kolejności FIFO*, zgodnie z listą zakupów.  
-- **Kasjerzy (2 stanowiska)** – obsługują klientów, ale:  
-  - zawsze czynne jest minimum 1 stanowisko,  
-  - na każde K = N/2 klientów powinno przypadać minimum 1 czynna kasa,  
-  - kasę można zamknąć dopiero po obsłużeniu wszystkich oczekujących.  
-- **Kierownik** – generuje sygnały, zamyka sklep, robi inwentaryzację i zapisuje raport.
+* **Piekarz** – działa jako producent; wytwarza produkty (11 typów) i umieszcza je na podajnikach w pamięci współdzielonej.
+* **Klienci** – generowani falami; wchodzą do sklepu, jeśli pozwala na to semafor licznikowy (limit N). Pobierają towary, a w przypadku braków stosują mechanizm ponawiania prób (*retry*).
+* **Kasjerzy (Dynamiczne stanowiska)** – domyślnie pracuje jeden kasjer. Jeśli kolejka komunikatów przekroczy próg (K = N/2), Kierownik dynamicznie uruchamia drugie stanowisko.
+* **Kierownik** – pełni rolę nadrzędną: inicjalizuje zasoby IPC, zarządza sygnałami, monitoruje obciążenie i generuje raport końcowy.
 
-Wszystkie role działają jako **osobne procesy**, komunikujące się poprzez:
-
-- **pamięć dzieloną** – stan podajników, liczba klientów w sklepie, stan kas,
-- **semafory System V** – synchronizacja dostępu do podajników,
-- **kolejkę komunikatów** – zgłoszenia klientów do obsługi,
-- **sygnały** – inwentaryzacja i ewakuacja,
-- **pipe / FIFO** – centralne logowanie.
-
-System **nie stosuje scentralizowanego algorytmu**, procesy działają niezależnie.
+Wszystkie role działają jako **osobne procesy** (uruchamiane przez `fork` i `exec`), komunikujące się poprzez standard IPC System V.
 
 ---
 
-# 2. Szczegółowa rola procesów
+## 2. Szczegółowa rola procesów
 
-## **Piekarz**
-- Co określony losowy czas tworzy *losową liczbę sztuk* różnych produktów.  
-- Każdy produkt odkłada na swój **podajnik Pi**, ale **tylko do maksymalnej pojemności Ki**.
-- Dostęp do podajnika jest chroniony semaforem.
-- Na koniec raportuje, ile sztuk *każdego produktu* wyprodukował.
+### **Piekarz**
+- Działa w pętli, symulując czas pieczenia poprzez `usleep`.
+- Odświeża stan **podajników** w pamięci współdzielonej, zwiększając licznik danego produktu.
+- Dostęp do magazynu chroniony jest binarnym semaforem (**mutex**).
+- Każda udana operacja pieczenia jest logowana na standardowe wyjście.
 
----
 
-## **Klient**
-- Próbuje wejść do sklepu – jeśli jest już N klientów, czeka.  
-- Ma *losową listę zakupów* obejmującą co najmniej 2 różne produkty.  
-- Dla każdego produktu:  
-  - jeśli podajnik nie jest pusty → bierze towar,  
-  - jeśli brak → pomija pozycję.  
-- Po zakupach ustawia się w **kolejce do kas (FIFO)**.  
-- Oczekuje na obsługę przez kasjera.  
-- Po zapłacie opuszcza sklep.  
-- Zapisuje log swojej aktywności.
 
----
+### **Klient**
+- **Wejście:** Podlega kontroli semafora licznikowego (maksymalnie N osób w sklepie).
+- **Zakupy:** Wybiera losowe produkty. Jeśli podajnik jest pusty, klient oczekuje (3 próby), dając szansę piekarzowi na dostarczenie towaru.
+- **Pusty Koszyk:** Jeśli po wszystkich próbach klient nic nie kupił, opuszcza sklep bez angażowania kasjera (optymalizacja zasobów IPC).
+- **Kolejka:** Klienci z produktami przesyłają swoje zamówienie do **kolejki komunikatów (FIFO)**.
 
-## **Kasjer (2 stanowiska)**
-- Odbiera klientów z kolejki komunikatów.  
-- Obsługuje ich zgodnie z dynamiczną polityką kierownika:
-  - jeśli klientów < N/2 → jedna kasa zostaje zamknięta,
-  - jeśli klientów ≥ N/2 → obie są otwarte,
-  - zamknięcie kasy następuje dopiero po obsłużeniu klientów oczekujących w jej kolejce.
-- Po obsłudze zgłasza sprzedaż (ile sztuk każdego produktu).  
-- Na koniec przekazuje podsumowanie sprzedaży do kierownika.
+### **Kasjer (Skalowanie dynamiczne)**
+- Odbiera zamówienia z kolejki komunikatów za pomocą funkcji `msgrcv`.
+- Sumuje sprzedane towary w strukturze statystyk znajdującej się w pamięci współdzielonej.
+- **Polityka kasy:**
+    - **Kasa 1:** Działa od początku symulacji.
+    - **Kasa 2:** Uruchamiana przez Kierownika tylko wtedy, gdy liczba komunikatów w kolejce oczekujących przekroczy zdefiniowany próg bezpieczeństwa.
+
+### **Kierownik**
+- **Zarządzanie IPC:** Tworzy i usuwa klucze `ftok`, segmenty pamięci (`shm`), semafory (`sem`) oraz kolejkę (`msg`).
+- **Obsługa sygnałów:** Implementuje obsługę `SIGINT` (Ctrl+C), co wyzwala procedurę bezpiecznego zamknięcia: ustawienie flagi zamknięcia, zakończenie procesów potomnych, wyświetlenie raportu i usunięcie zasobów z jądra.
+- **Raport końcowy:** Prezentuje tabelaryczne zestawienie produkcji i sprzedaży każdego z 11 typów produktów.
 
 ---
 
-## **Kierownik**
-- Obsługuje sygnały:
-  - `SIGUSR1` – *inwentaryzacja*, ale wykonywana **po zamknięciu sklepu**,
-  - `SIGUSR2` – *ewakuacja natychmiastowa*: klienci przerywają zakupy, odkładają pobrane towary do kosza i wychodzą bez płacenia,
-  - `SIGINT` – łagodne zakończenie pracy całego systemu.
-- Po zakończeniu pracy:
-  - zbiera informacje od piekarzy i kasjerów,
-  - sumuje pozostały towar na podajnikach,
-  - tworzy **raport końcowy** do pliku tekstowego,
-  - usuwa zasoby IPC.
-
----
-
-# 3. Mechanizmy IPC użyte w projekcie
+## 3. Mechanizmy IPC użyte w projekcie
 
 | Mechanizm | Zastosowanie |
-|----------|--------------|
-| **Pamięć dzielona** | Podajniki, liczba klientów, stan kas |
-| **Semafory** | Ochrona dostępu do podajników |
-| **Kolejka komunikatów** | Klienci → kasjerzy |
-| **Pipe / FIFO** | Logowanie |
-| **Sygnały** | Inwentaryzacja i ewakuacja |
-| **Procesy** | Piekarz, klient, kasjer, kierownik, logger |
+|:--- |:--- |
+| **Pamięć dzielona (`shm`)** | Przechowywanie stanu podajników, liczników statystyk i flagi kontrolnej. |
+| **Semafory (`sem`)** | Kontrola limitu osób w sklepie oraz ochrona sekcji krytycznej (mutex). |
+| **Kolejka komunikatów (`msg`)** | Asynchroniczne przesyłanie zamówień od Klientów do Kasjerów. |
+| **Sygnały (`signal`)** | Obsługa zamknięcia systemu i czyszczenia zasobów. |
+| **Procesy (`fork/exec`)** | Fizyczny podział na niezależne moduły wykonywalne. |
+
+
 
 ---
 
-# 4. Parametry programu
-
-Uruchomienie:
-
-./ciastkarnia -P <piekarze> -N <maks. klienci> -K <pojemność podajników> -t <czas działania>
-
-shell
-Skopiuj kod
-
-### Przykład:
-
-./ciastkarnia -P 2 -N 20 -K 10 -t 60
-
-yaml
-Skopiuj kod
-
-Walidacja obejmuje:
-
-- czy parametry istnieją,  
-- czy są > 0,  
-- czy nie przekraczają logicznych limitów.
-
----
-
-# 5. Kompilacja i uruchomienie
-
-### **Wymagane środowisko**
-Linux (Ubuntu/Debian):
-
-sudo apt install build-essential
-
-markdown
-Skopiuj kod
+## 4. Instrukcja Kompilacji i Uruchomienia
 
 ### **Kompilacja**
+Projekt wykorzystuje plik `Makefile` do automatyzacji budowania czterech modułów. Aby skompilować system, należy wykonać:
+```bash
+make clean
 make
 
-markdown
-Skopiuj kod
+Uruchomienie
 
-### **Uruchomienie**
-./ciastkarnia -P 2 -N 30 -K 10 -t 45
+```
+./kierownik
+```bash
 
-markdown
-Skopiuj kod
+## 5. Scenariusze Testowe
 
-### **Czyszczenie**
-make clean
+W celu weryfikacji poprawności implementacji mechanizmów synchronizacji oraz odporności systemu na sytuacje graniczne, przeprowadzono następujące testy:
 
-yaml
-Skopiuj kod
+| ID | Nazwa Testu | Cel Testu | Oczekiwany Wynik | Status |
+|:---|:---|:---|:---|:---:|
+| **T01** | **Synchronizacja (Race Condition)** | Sprawdzenie czy wielu klientów nie pobierze tego samego produktu jednocześnie. | Stan podajnika nigdy nie spada poniżej 0. Dane w raporcie są spójne. | **OK** |
+| **T02** | **Dynamiczne Skalowanie** | Weryfikacja reakcji Kierownika na dużą liczbę komunikatów w kolejce. | Po przekroczeniu progu N/2 komunikatów, uruchamiany jest proces Kasjer 2. | **OK** |
+| **T03** | **Sprzątanie Zasobów** | Sprawdzenie czy po sygnale SIGINT (Ctrl+C) zasoby IPC są usuwane. | Komenda `ipcs` nie wykazuje żadnych aktywnych zasobów po zamknięciu programu. | **OK** |
+| **T04** | **Pusty Koszyk** | Weryfikacja optymalizacji procesów przy braku towaru. | Klient bez produktów opuszcza sklep bez wysyłania wiadomości do kolejki. | **OK** |
 
----
+### Szczegółowy opis wyników:
 
-# 6. Testy końcowe
+#### **Test 1 – Integralność danych**
+Dzięki zastosowaniu semafora binarnego (Mutex) jako blokady sekcji krytycznej, operacje na pamięci współdzielonej są atomowe. Testy wykazały, że nawet przy maksymalnym zagęszczeniu klientów, liczba sprzedanych produktów dokładnie odpowiada operacjom dekrementacji stanu podajnika.
 
-## **Test 1 – Normalna praca**
-20 klientów, 2 kasjerów, 1 piekarz.  
-
-**Oczekiwane:**  
-- brak deadlocków  
-- każdy klient obsłużony  
-- poprawne działanie FIFO kas  
-
----
-
-## **Test 2 – Przepełnienie podajników**
-3 piekarzy, pojemność Ki = 5.  
-
-**Oczekiwane:**  
-- piekarze czekają, gdy podajnik pełny  
-- brak nadpisania pamięci  
-
----
-
-## **Test 3 – Duże obciążenie kas**
-30 klientów, 3 piekarzy.  
-
-**Oczekiwane:**  
-- dynamiczne otwieranie i zamykanie kas  
-- brak blokad IPC  
-
----
-
-## **Test 4 – Sygnały**
-Podczas działania:
-
-kill -USR1 <PID>
-kill -USR2 <PID>
-
-yaml
-Skopiuj kod
-
-**Oczekiwane:**  
-- prawidłowa inwentaryzacja  
-- natychmiastowa ewakuacja  
-- poprawne zwolnienie zasobów IPC  
-
----
+#### **Test 2 – Skalowalność (Load Balancing)**
+Mechanizm monitorowania kolejki przy użyciu `msgctl` z flagą `IPC_STAT` działa poprawnie. Logi systemowe potwierdzają, że proces Kasjera 2 jest wywoływany tylko w momentach rzeczywistego zatoru, co optymalizuje wykorzystanie procesora.
 
 
-# Link do repozytorium GitHub  
-**→ [https://github.com/LEGION-programmer/LEGION-programmer-SO-projekt-ciastkarnia/tree/main]()**
 
+#### **Test 3 – Zarządzanie sygnałami**
+Zaimplementowany interfejs obsługi sygnałów gwarantuje, że proces nadrzędny (Kierownik) przed zakończeniem własnej pracy wysyła sygnały zakończenia do wszystkich procesów potomnych (`kill`) oraz zwalnia identyfikatory IPC (`shmctl`, `semctl`, `msgctl`). Zapobiega to wyciekom pamięci w systemie operacyjnym.
+
+#### **Test 4 – Cierpliwość klienta (Retry logic)**
+Klienci nie rezygnują z zakupu natychmiast po napotkaniu pustego podajnika. Mechanizm 3-krotnego ponowienia próby z opóźnieniem `usleep` pozwala na płynną współpracę z Piekarzem, redukując liczbę "pustych" wizyt w sklepie.
+
+Link do repozytorium GitHub
+→ https://github.com/LEGION-programmer/LEGION-programmer-SO-projekt-ciastkarnia/tree/main
