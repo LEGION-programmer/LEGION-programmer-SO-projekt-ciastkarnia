@@ -1,0 +1,19 @@
+[Klient 42985] Wszedl do sklepu.
+[Klient 42985] Wybral: Sernik (1 szt.)
+[Klient 42985] Zakupy gotowe, idzie do kasy.
+[Klient 42988] Wszedl do sklepu.
+[Klient 42988] Wybral: Makowiec (3 szt.)
+[Klient 42988] Wybral: Sernik (2 szt.)
+[Klient 42988] Zakupy gotowe, idzie do kasy.
+[Klient 42986] Wszedl do sklepu.
+[Klient 42986] Nic nie kupil i wychodzi ze sklepu.
+[Kasa 1] Obsluzono klienta 42985
+[Kasa 1] Obsluzono klienta 42988
+[Kierownik] Sklep OTWARTY (czas: 10s, prog: 2)
+[Kierownik] Duży ruch (2 osób). Otwieram Kasę 2.
+
+[Kierownik] Zamykanie sklepu...
+[Kierownik] Raport gotowy. Do widzenia.
+[Klient 42989] Wszedl do sklepu.
+[Klient 42989] Wybral: Makowiec (1 szt.)
+[Klient 42989] Nic nie kupil i wychodzi ze sklepu.

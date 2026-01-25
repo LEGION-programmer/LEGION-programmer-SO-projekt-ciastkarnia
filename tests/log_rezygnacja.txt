@@ -1,0 +1,22 @@
+[Klient 43003] Wszedl do sklepu.
+[Klient 43003] Nic nie kupil i wychodzi ze sklepu.
+[Klient 43004] Wszedl do sklepu.
+[Klient 43004] Wybral: Ekler (1 szt.)
+[Klient 43004] Zakupy gotowe, idzie do kasy.
+[Klient 43006] Wszedl do sklepu.
+[Klient 43006] Wybral: Ekler (2 szt.)
+[Klient 43006] Wybral: Ekler (1 szt.)
+[Klient 43006] Zakupy gotowe, idzie do kasy.
+[Klient 43005] Wszedl do sklepu.
+[Klient 43005] Wybral: Ekler (1 szt.)
+[Klient 43005] Zakupy gotowe, idzie do kasy.
+[Kasa 1] Obsluzono klienta 43004
+[Kasa 1] Obsluzono klienta 43006
+[Kasa 1] Obsluzono klienta 43005
+[Klient 43008] Wszedl do sklepu.
+[Klient 43008] Wybral: Muffin (1 szt.)
+[Klient 43008] Nic nie kupil i wychodzi ze sklepu.
+[Kierownik] Sklep OTWARTY (czas: 5s, prog: 5)
+
+[Kierownik] Zamykanie sklepu...
+[Kierownik] Raport gotowy. Do widzenia.

@@ -1,34 +1,33 @@
 # Ustawienia kompilatora
 CC = gcc
+# -Isrc/include mówi kompilatorowi: "szukaj nagłówków w folderze src/include"
 CFLAGS = -Wall -Wextra -Isrc/include
-LDFLAGS = 
-
-# Lista programów do zbudowania
 TARGETS = kierownik piekarz kasjer klient
 
-# Domyślna reguła (wywoływana przez wpisanie 'make')
+# Lokalizacja nagłówka dla mechanizmu zależności
+DEPS = src/include/ciastkarnia.h
+
 all: $(TARGETS)
 
-# Kompilacja Kierownika
-kierownik: src/kierownik.c
+# Kompilacja modułów
+kierownik: src/kierownik.c $(DEPS)
 	$(CC) $(CFLAGS) src/kierownik.c -o kierownik
 
-# Kompilacja Piekarza
-piekarz: src/piekarz.c
+piekarz: src/piekarz.c $(DEPS)
 	$(CC) $(CFLAGS) src/piekarz.c -o piekarz
 
-# Kompilacja Kasjera
-kasjer: src/kasjer.c
+kasjer: src/kasjer.c $(DEPS)
 	$(CC) $(CFLAGS) src/kasjer.c -o kasjer
 
-# Kompilacja Klienta
-klient: src/klient.c
+klient: src/klient.c $(DEPS)
 	$(CC) $(CFLAGS) src/klient.c -o klient
 
-# Czyszczenie plików binarnych (wywoływane przez 'make clean')
 clean:
-	rm -f $(TARGETS)
-	@echo "Pliki binarne usunięte."
+	rm -f $(TARGETS) raport_koncowy.txt
+	@echo "Wyczyszczono pliki binarne i raporty."
 
-# Reguła zapobiegająca problemom z plikami o nazwach takich jak reguły
+run: all
+	ipcrm -a || true
+	./kierownik
+
 .PHONY: all clean

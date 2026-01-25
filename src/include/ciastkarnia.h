@@ -3,24 +3,28 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
-#include <sys/types.h>
 #include <signal.h>
 #include <time.h>
+#include <errno.h>
 
 #define PROJEKT_ID 99
 #define P_TYPY 11
-#define MAX_KLIENCI_W_SRODKU 5
-#define POJEMNOSC_PODAJNIKA 10
+#define MAX_KLIENCI 10  // N
+#define K_PROG (MAX_KLIENCI/2) // K
+#define POJEMNOSC_PODAJNIKA 15
 
-static const char* PRODUKTY_NAZWY[] = {
-    "Paczek", "Kremowka", "WZ-tka", "Sernik", "Makowiec", 
-    "Ekler", "Mazurek", "Drozdżowka", "Beza", "Tarta", "Szarlotka"
+// Typy sygnałów z zadania
+#define SIG_INWENTARYZACJA SIGUSR1
+#define SIG_EWAKUACJA SIGUSR2
+
+const char *PRODUKTY_NAZWY[] = {
+    "Sernik", "Makowiec", "Paczki", "Ekler", "Muffin", 
+    "Beza", "Szarlotka", "Wuzetka", "Rogal", "Tarta", "Pralina"
 };
 
 typedef struct {
@@ -28,6 +32,7 @@ typedef struct {
     int wytworzono[P_TYPY];
     int sprzedano[P_TYPY];
     int sklep_otwarty;
+    int ewakuacja; // Flaga dla klientów
 } shared_data_t;
 
 typedef struct {
@@ -36,7 +41,7 @@ typedef struct {
     int produkty[P_TYPY];
 } msg_zamowienie_t;
 
-static void sem_op(int semid, int sem_num, int op) {
+void sem_op(int semid, int sem_num, int op) {
     struct sembuf sb = {sem_num, op, 0};
     semop(semid, &sb, 1);
 }
