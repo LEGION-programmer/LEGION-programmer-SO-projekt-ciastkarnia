@@ -1,123 +1,121 @@
 #include "ciastkarnia.h"
+#include <sys/wait.h>
 
-// Flaga sterująca pętlą - volatile sig_atomic_t dla bezpieczeństwa wątkowego
-volatile sig_atomic_t kontynuuj = 1;
+int shmid = -1, semid = -1, msqid = -1;
+shared_data_t *shm = (void *)-1;
+pid_t kasy[2] = {0, 0};
 
-int shmid, semid, msqid;
-shared_data_t *shm;
+void generuj_raport() {
+    if (shm == (void *)-1) return;
+    FILE *f = fopen("raport.txt", "w");
+    #define PRINT_BOTH(...) { printf(__VA_ARGS__); if(f) fprintf(f, __VA_ARGS__); }
 
-void usun_stare_zasoby() {
-    key_t klucz = ftok(".", PROJEKT_ID);
-    int s_id = shmget(klucz, 0, 0);
-    if (s_id != -1) shmctl(s_id, IPC_RMID, NULL);
-    int sem_id = semget(klucz, 0, 0);
-    if (sem_id != -1) semctl(sem_id, 0, IPC_RMID);
-    int m_id = msgget(klucz, 0);
-    if (m_id != -1) msgctl(m_id, IPC_RMID, NULL);
-}
+    PRINT_BOTH("\n====================================================\n");
+    PRINT_BOTH("         RAPORT KONCOWY Z PRACY CIASTKARNI\n");
+    PRINT_BOTH("====================================================\n");
+    PRINT_BOTH("%-15s | %-12s | %-10s | %-8s\n", "Produkt", "Wytworzono", "Sprzedano", "Zostalo");
+    PRINT_BOTH("----------------------------------------------------\n");
 
-void raport_do_pliku(shared_data_t *data) {
-    FILE *f = fopen("raport_koncowy.txt", "w");
-    if(!f) return;
-    fprintf(f, "--- RAPORT KOŃCOWY Z SYMULACJI ---\n");
-    fprintf(f, "%-15s | %-12s | %-10s | %-10s\n", "Produkt", "Wytworzono", "Sprzedano", "Zostalo");
-    fprintf(f, "------------------------------------------------------------\n");
+    int sw = 0, ss = 0, sz = 0;
     for (int i = 0; i < P_TYPY; i++) {
-        fprintf(f, "%-15s | %-12d | %-10d | %-10d\n", 
-               PRODUKTY_NAZWY[i], data->wytworzono[i], data->sprzedano[i], data->stan_podajnika[i]);
+        int w = shm->wytworzono[i];
+        int s = shm->sprzedano[i];
+        int z = shm->stan_podajnika[i];
+        PRINT_BOTH("%-15s | %-12d | %-10d | %-8d\n", PRODUKTY_NAZWY[i], w, s, z);
+        sw += w; ss += s; sz += z;
     }
-    fclose(f);
+    PRINT_BOTH("----------------------------------------------------\n");
+    PRINT_BOTH("%-15s | %-12d | %-10d | %-8d\n", "SUMA", sw, ss, sz);
+    PRINT_BOTH("Weryfikacja: %d (W) - %d (S) = %d (Z) -> %s\n", sw, ss, sw-ss, (sw-ss == sz) ? "OK" : "BLAD");
+    PRINT_BOTH("====================================================\n");
+    if (f) { fflush(f); fclose(f); }
 }
 
-void handler_kierownika(int sig) {
-    if (sig == SIGINT) {
-        kontynuuj = 0;
+void sprzatanie_ipc(int sig) {
+    // BLOKADA: Kierownik całkowicie ignoruje te sygnały u siebie
+    signal(SIGUSR1, SIG_IGN);
+    signal(SIGUSR2, SIG_IGN);
+    signal(SIGINT,  SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+
+    if (sig == SIGINT || sig == SIGUSR2) {
+        printf("\n[Kierownik] !!! EWAKUACJA (Sygnal SIGUSR2) !!!\n");
+        // kill(-getpid(), ...) wysyła sygnał do całej grupy procesów
+        // Używamy tego zamiast 0, aby być bardziej precyzyjnym
+        kill(0, SIGUSR2);
+    } else {
+        printf("\n[Kierownik] Zamykanie sklepu - Inwentaryzacja (Sygnal SIGUSR1)\n");
+        kill(0, SIGUSR1);
     }
+
+    // Dajemy czas dzieciom na zapisanie danych w SHM
+    usleep(500000); 
+
+    generuj_raport();
+
+    if (shm != (void *)-1) shmdt(shm);
+    if (shmid != -1) shmctl(shmid, IPC_RMID, NULL);
+    if (semid != -1) semctl(semid, 0, IPC_RMID);
+    if (msqid != -1) msgctl(msqid, IPC_RMID, NULL);
+    
+    printf("[Kierownik] Zasoby IPC usuniete. Koniec.\n");
+    exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    // ARGUMENTY: 1 - czas trwania, 2 - próg otwarcia nowej kasy
-    int czas_trwania = (argc > 1) ? atoi(argv[1]) : 30;
-    int prog_kasy = (argc > 2) ? atoi(argv[2]) : K_PROG;
-    
-    srand(time(NULL));
-    usun_stare_zasoby();
+    // Ustawienie grupy procesów - kluczowe dla poprawnego kill(0, ...)
+    setpgid(0, 0); 
+
+    int N = (argc > 1) ? atoi(argv[1]) : 10;
+    int K = (argc > 2) ? atoi(argv[2]) : N / 2;
+    int stress = (argc > 3) ? atoi(argv[3]) : 0;
+    int sym_czas = 20;
 
     key_t klucz = ftok(".", PROJEKT_ID);
-    shmid = shmget(klucz, sizeof(shared_data_t), IPC_CREAT | 0666);
-    shm = (shared_data_t *)shmat(shmid, NULL, 0);
+    shmid = shmget(klucz, sizeof(shared_data_t), IPC_CREAT | 0600);
+    semid = semget(klucz, 2, IPC_CREAT | 0600);
+    msqid = msgget(klucz, IPC_CREAT | 0600);
+    shm = shmat(shmid, NULL, 0);
+
+    if (shm != (void*)-1) memset(shm, 0, sizeof(shared_data_t));
     
-    // Inicjalizacja pamięci
-    shm->sklep_otwarty = 0;
-    for(int i=0; i<P_TYPY; i++) {
-        shm->stan_podajnika[i] = 0;
-        shm->wytworzono[i] = 0;
-        shm->sprzedano[i] = 0;
-    }
+    semctl(semid, 0, SETVAL, N); 
+    semctl(semid, 1, SETVAL, 1); 
 
-    semid = semget(klucz, 2, IPC_CREAT | 0666);
-    semctl(semid, 0, SETVAL, MAX_KLIENCI);
-    semctl(semid, 1, SETVAL, 1);
-    msqid = msgget(klucz, IPC_CREAT | 0666);
+    signal(SIGINT, sprzatanie_ipc);
+    signal(SIGTERM, sprzatanie_ipc);
+    signal(SIGUSR1, sprzatanie_ipc);
 
-    // Rejestracja SIGINT
-    struct sigaction sa;
-    sa.sa_handler = handler_kierownika;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, NULL);
-    
-    signal(SIGCHLD, SIG_IGN); 
+    if (fork() == 0) execl("./piekarz", "piekarz", NULL);
+    sleep(1); 
 
-    // Start Piekarza
-    if (fork() == 0) {
-        execl("./piekarz", "piekarz", NULL);
-        _exit(1); 
-    }
-    
-    for(int i=0; i<2 && kontynuuj; i++) sleep(1);
+    shm->sklep_otwarty = 1;
+    time_t start = time(NULL);
 
-    if (kontynuuj) {
-        shm->sklep_otwarty = 1; 
-        if (fork() == 0) { execl("./kasjer", "kasjer", "1", NULL); _exit(1); }
-        printf("[Kierownik] Sklep OTWARTY (czas: %ds, prog: %d)\n", czas_trwania, prog_kasy);
-    }
+    while (stress > 0 || (time(NULL) - start < sym_czas)) {
+        int obecni = N - semctl(semid, 0, GETVAL);
+        int potrzebne_kasy = (K > 0) ? (obecni / K) + 1 : 1;
+        if (potrzebne_kasy > 2) potrzebne_kasy = 2; 
 
-    time_t start_otwarcia = time(NULL);
-    int kasa2_otwarta = 0;
-
-    while (kontynuuj && (time(NULL) - start_otwarcia < czas_trwania)) {
-        // Logika skalowania: sprawdź liczbę osób w sklepie
-        int obecni = MAX_KLIENCI - semctl(semid, 0, GETVAL);
-        if (!kasa2_otwarta && obecni >= prog_kasy) {
-            printf("[Kierownik] Duży ruch (%d osób). Otwieram Kasę 2.\n", obecni);
-            if (fork() == 0) { execl("./kasjer", "kasjer", "2", NULL); _exit(1); }
-            kasa2_otwarta = 1;
+        for (int i = 0; i < 2; i++) {
+            if (i < potrzebne_kasy && kasy[i] == 0) {
+                char nr[2]; sprintf(nr, "%d", i+1);
+                if ((kasy[i] = fork()) == 0) execl("./kasjer", "kasjer", nr, NULL);
+            }
         }
 
-        if (rand() % 10 < 4) {
-            if (fork() == 0) { execl("./klient", "klient", NULL); _exit(1); }
+        if (stress > 0) {
+            if (fork() == 0) { execl("./klient", "klient", NULL); exit(0); }
+            stress--;
+            usleep(100); 
+        } else {
+            if (rand() % 10 < 3) { 
+                if (fork() == 0) { execl("./klient", "klient", NULL); exit(0); } 
+            }
+            sleep(1);
         }
-        usleep(700000); 
     }
 
-    printf("\n[Kierownik] Zamykanie sklepu...\n");
-    shm->sklep_otwarty = 0; 
-
-    // Czekaj na wyjście klientów
-    while ((MAX_KLIENCI - semctl(semid, 0, GETVAL)) > 0 && kontynuuj) {
-        sleep(1);
-    }
-
-    raport_do_pliku(shm);
-    system("pkill -TERM piekarz");
-    system("pkill -TERM kasjer");
-    
-    shmdt(shm);
-    shmctl(shmid, IPC_RMID, NULL);
-    semctl(semid, 0, IPC_RMID);
-    msgctl(msqid, IPC_RMID, NULL);
-
-    printf("[Kierownik] Raport gotowy. Do widzenia.\n");
+    sprzatanie_ipc(SIGUSR1);
     return 0;
 }

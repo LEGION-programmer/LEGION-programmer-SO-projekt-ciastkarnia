@@ -1,39 +1,43 @@
 #include "ciastkarnia.h"
 
+void stop_piekarz(int sig) {
+    (void)sig; 
+    _exit(0); 
+}
+
 int main() {
+    signal(SIGUSR1, stop_piekarz);
+    signal(SIGUSR2, stop_piekarz);
+    signal(SIGINT, SIG_IGN);
+
+    key_t k = ftok(".", PROJEKT_ID);
+    int shmid = shmget(k, sizeof(shared_data_t), 0);
+    shared_data_t *shm = shmat(shmid, NULL, 0);
+    int semid = semget(k, 2, 0);
+
     srand(getpid());
-    key_t klucz = ftok(".", PROJEKT_ID);
-    int shmid = shmget(klucz, sizeof(shared_data_t), 0666);
-    shared_data_t *shm = (shared_data_t *)shmat(shmid, NULL, 0);
-    int semid = semget(klucz, 2, 0666);
 
-    while (shm->sklep_otwarty || shm->wytworzono[0] == 0) {
-        usleep(1500000); 
-        
+    printf("[Piekarz] Rozpoczynam wypieki...\n");
+
+    while(1) {
         int typ = rand() % P_TYPY;
-        int ile = (rand() % 5) + 1;
+        int ilosc = (rand() % 3) + 1;
 
-        sem_op(semid, 1, -1); // WEJŚCIE DO SEKCJI KRYTYCZNEJ
+        sem_op(semid, 1, -1); // Wejście do sekcji krytycznej
         
-        // Sprawdzamy, czy zmieści się na podajniku
-        if (shm->stan_podajnika[typ] + ile <= POJEMNOSC_PODAJNIKA) {
-            shm->stan_podajnika[typ] += ile;
-            shm->wytworzono[typ] += ile; // Statystyka rośnie TYLKO gdy faktycznie dostarczono
-            printf("[Piekarz] Dostawa: %s (+%d)\n", PRODUKTY_NAZWY[typ], ile);
-        } else {
-            // Jeśli podajnik pełny, piekarz dodaje tylko tyle, ile wejdzie
-            int wolne = POJEMNOSC_PODAJNIKA - shm->stan_podajnika[typ];
-            if (wolne > 0) {
-                shm->stan_podajnika[typ] += wolne;
-                shm->wytworzono[typ] += wolne;
-                printf("[Piekarz] Dostawa czesciowa: %s (+%d)\n", PRODUKTY_NAZWY[typ], wolne);
-            }
+        if (shm->stan_podajnika[typ] + ilosc <= POJEMNOSC_PODAJNIKA) {
+            shm->stan_podajnika[typ] += ilosc;
+            shm->wytworzono[typ] += ilosc;
+            
+            // DODANO: Komunikat o wypieku
+            printf("[Piekarz] Wypieczono: %d x %s. Stan na polce: %d\n", 
+                   ilosc, PRODUKTY_NAZWY[typ], shm->stan_podajnika[typ]);
         }
         
-        sem_op(semid, 1, 1); // WYJŚCIE
-        
-        if (!shm->sklep_otwarty && shm->wytworzono[0] > 0) break;
+        sem_op(semid, 1, 1); // Wyjście z sekcji krytycznej
+
+        // SPOWOLNIENIE: 
+        usleep(800000); 
     }
-    shmdt(shm);
     return 0;
 }

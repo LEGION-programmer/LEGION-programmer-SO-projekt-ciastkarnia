@@ -10,40 +10,35 @@
 #include <sys/msg.h>
 #include <signal.h>
 #include <time.h>
+#include <string.h>
 #include <errno.h>
 
-#define PROJEKT_ID 99
+#define PROJEKT_ID 'C'
 #define P_TYPY 11
-#define MAX_KLIENCI 10  // N
-#define K_PROG (MAX_KLIENCI/2) // K
-#define POJEMNOSC_PODAJNIKA 15
-
-// Typy sygnałów z zadania
-#define SIG_INWENTARYZACJA SIGUSR1
-#define SIG_EWAKUACJA SIGUSR2
-
-const char *PRODUKTY_NAZWY[] = {
-    "Sernik", "Makowiec", "Paczki", "Ekler", "Muffin", 
-    "Beza", "Szarlotka", "Wuzetka", "Rogal", "Tarta", "Pralina"
-};
+#define POJEMNOSC_PODAJNIKA 20
 
 typedef struct {
+    int sklep_otwarty;
     int stan_podajnika[P_TYPY];
     int wytworzono[P_TYPY];
     int sprzedano[P_TYPY];
-    int sklep_otwarty;
-    int ewakuacja; // Flaga dla klientów
 } shared_data_t;
 
 typedef struct {
     long mtype;
-    int klient_id;
-    int produkty[P_TYPY];
-} msg_zamowienie_t;
+    int typ;
+    int ilosc;
+} order_t;
 
-void sem_op(int semid, int sem_num, int op) {
-    struct sembuf sb = {sem_num, op, 0};
-    semop(semid, &sb, 1);
+static const char *PRODUKTY_NAZWY[] = {
+    "Sernik", "Makowiec", "Paczki", "Drozdzowka", "Beza", 
+    "Mazurek", "Szarlotka", "Kremowka", "Piernik", "Tarta", "Eklery"
+};
+
+// Pomocnicza funkcja do semaforów
+static inline int sem_op(int semid, int sem_num, int op) {
+    struct sembuf sb = {sem_num, (short)op, SEM_UNDO};
+    return semop(semid, &sb, 1);
 }
 
 #endif

@@ -29,17 +29,16 @@ Wszystkie role działają jako **osobne procesy** (uruchamiane przez `fork` i `e
 
 
 ### **Klient**
-- **Wejście:** Podlega kontroli semafora licznikowego (maksymalnie N osób w sklepie).
-- **Zakupy:** Wybiera losowe produkty. Jeśli podajnik jest pusty, klient oczekuje (3 próby), dając szansę piekarzowi na dostarczenie towaru.
-- **Pusty Koszyk:** Jeśli po wszystkich próbach klient nic nie kupił, opuszcza sklep bez angażowania kasjera (optymalizacja zasobów IPC).
-- **Kolejka:** Klienci z produktami przesyłają swoje zamówienie do **kolejki komunikatów (FIFO)**.
+- **Wejście:** Kontrolowane semaforem licznikowym (limit N osób w sklepie).
+- **Zakupy:** Wybiera losowe produkty i wysyła zamówienie do kolejki komunikatów.
+- **Synchronizacja:** Po wysłaniu zamówienia zwalnia miejsce w sklepie (podnosi semafor), umożliwiając wejście kolejnej osobie.
 
 ### **Kasjer (Skalowanie dynamiczne)**
 - Odbiera zamówienia z kolejki komunikatów za pomocą funkcji `msgrcv`.
 - Sumuje sprzedane towary w strukturze statystyk znajdującej się w pamięci współdzielonej.
 - **Polityka kasy:**
     - **Kasa 1:** Działa od początku symulacji.
-    - **Kasa 2:** Uruchamiana przez Kierownika tylko wtedy, gdy liczba komunikatów w kolejce oczekujących przekroczy zdefiniowany próg bezpieczeństwa.
+    - **Kasa 2:** Uruchamiana jest na podstawie liczby klientów aktualnie przebywających w sklepie (monitorowanie semafora licznikowego przez Kierownika).
 
 ### **Kierownik**
 - **Zarządzanie IPC:** Tworzy i usuwa klucze `ftok`, segmenty pamięci (`shm`), semafory (`sem`) oraz kolejkę (`msg`).
@@ -102,6 +101,70 @@ Zaimplementowany interfejs obsługi sygnałów gwarantuje, że proces nadrzędny
 
 #### **Test 4 – Cierpliwość klienta (Retry logic)**
 Klienci nie rezygnują z zakupu natychmiast po napotkaniu pustego podajnika. Mechanizm 3-krotnego ponowienia próby z opóźnieniem `usleep` pozwala na płynną współpracę z Piekarzem, redukując liczbę "pustych" wizyt w sklepie.
+
+### **Uruchomienie**
+
+Symulację uruchamiamy za pomocą procesu nadrzędnego (Kierownika). Program przyjmuje dwa opcjonalne argumenty wiersza poleceń:
+
+```bash
+./kierownik [czas_sekundy] [prog_kasy]
+czas_sekundy (domyślnie 30): Określa, po jakim czasie sklep zostanie zamknięty dla nowych klientów.
+
+prog_kasy (domyślnie 5): Określa liczbę klientów w kolejce, powyżej której Kierownik otworzy drugą kasę.
+
+Przykład: ./kierownik 60 2 — Sklep działa przez minutę, a druga kasa otworzy się już przy 2 osobach w kolejce.
+
+### 5. Scenariusze Testowe
+
+W celu weryfikacji poprawności implementacji mechanizmów synchronizacji oraz odporności systemu na sytuacje graniczne, przeprowadzono testy automatyczne zawarte w dedykowanym skrypcie `testy_ipc.sh`.
+
+| ID | Nazwa Testu | Cel i Metodyka | Oczekiwany Wynik | Status |
+|:---|:---|:---|:---|:---:|
+| **T01** | **Stress Test** | Symulacja 1000 klientów działających asynchronicznie w krótkim czasie. | Raport końcowy wykazuje pełną spójność danych (W-S=Z). | **OK** |
+| **T02** | **Skalowanie Kas** | Generowanie nagłego tłumu klientów przy niskim progu wydajności **K**. | Kierownik wykrywa obciążenie i uruchamia proces **Kasjer 2**. | **OK** |
+| **T03** | **Kolejka Msg** | Weryfikacja przepływu struktur `order_t` od Klienta do Kasjera. | Licznik sprzedaży w raporcie jest większy od zera. | **OK** |
+| **T04** | **Czyszczenie IPC** | Sprawdzenie stanu jądra systemu po wymuszeniu raportu sygnałem `SIGINT`. | Narzędzie `ipcs` nie raportuje żadnych aktywnych zasobów projektu. | **OK** |
+
+
+
+#### Szczegółowy opis wyników:
+
+* **Test 1 – Integralność danych (Concurrency):**
+    Mimo ekstremalnego obciążenia (1000 procesów), użycie semaforów binarnych z flagą `SEM_UNDO` wyeliminowało zjawisko wyścigów (*race conditions*). Pamięć współdzielona została zaktualizowana poprawnie, co potwierdza komunikat "Weryfikacja: OK" w raporcie końcowym.
+
+* **Test 2 – Skalowalność (Load Balancing):**
+    Test potwierdził poprawność algorytmu monitorowania obciążenia. Kierownik, odczytując stan semafora licznikowego (liczba osób aktualnie przebywających w sklepie), poprawnie zinterpretował zator i powołał nowy proces Kasjera za pomocą funkcji `fork()` i `exec()`.
+
+* **Test 3 – Komunikacja asynchroniczna:**
+    Weryfikacja wykazała, że kolejka komunikatów poprawnie buforuje zamówienia. Dzięki zastosowaniu `usleep` u Kasjera (symulacja czasu obsługi), procesy Klientów mogły opuścić sklep natychmiast po wysłaniu zamówienia, co udowadnia poprawność asynchronicznego modelu komunikacji IPC.
+
+* **Test 4 – Zarządzanie sygnałami i zasobami:**
+    Dzięki grupowaniu procesów (`setpgid`) i mechanizmowi ignorowania sygnałów u lidera grupy w trakcie procedury sprzątania, proces Kierownika poprawnie obsłużył sygnał `SIGINT`. Wszystkie segmenty pamięci współdzielonej (`shm`), kolejki komunikatów (`msg`) oraz zestawy semaforów (`sem`) zostały poprawnie usunięte z jądra systemu.
+
+## 6. Analiza synchronizacji i bezpieczeństwa (Techniczne)
+
+Podczas implementacji systemu Ciastkarnia, szczególną uwagę poświęcono stabilności procesów oraz odporności na błędy typowe dla środowisk wieloprocesowych.
+
+### 1. Atomowość i ochrona przed wyścigami (Race Conditions)
+Każda modyfikacja struktur w pamięci współdzielonej (np. aktualizacja stanu podajnika przez Piekarza czy liczników sprzedaży przez Kasjera) odbywa się wewnątrz sekcji krytycznej chronionej przez **semafor binarny (Mutex)**. Gwarantuje to, że w danym momencie tylko jeden proces może zmieniać dane w `shared_data_t`, co eliminuje błędy spójności przy dużej liczbie klientów.
+
+### 2. Wykorzystanie flagi `SEM_UNDO`
+Wszystkie operacje na semaforach (blokowanie i zwalnianie) wykorzystują flagę `SEM_UNDO`. Jest to kluczowy mechanizm bezpieczeństwa: jeśli proces Klienta lub Kasjera zostanie nagle przerwany (np. przez błąd systemu lub sygnał `SIGKILL`), jądro systemu automatycznie wycofa zmiany wprowadzone przez ten proces w semaforach. Zapobiega to trwałemu zablokowaniu (*deadlock*) zasobów dla pozostałych procesów.
+
+
+
+### 3. "Pancerna" obsługa sygnałów i zarządzanie grupą
+W celu uniknięcia błędów typu `User defined signal 2` (wynikających z wyścigów sygnałów), zastosowano dwie zaawansowane techniki:
+* **`setpgid(0, 0)`**: Kierownik tworzy nową grupę procesów, stając się jej liderem. Pozwala to na precyzyjne adresowanie sygnałów do wszystkich potomków jednocześnie.
+* **Blokada Sygnałów (`SIG_IGN`)**: W trakcie procedury sprzątania, Kierownik tymczasowo ignoruje sygnały przychodzące do niego samego. Dzięki temu nie ginie od sygnału wysłanego do całej grupy, co pozwala mu na bezpieczne wygenerowanie raportu końcowego i usunięcie struktur IPC.
+
+### 4. Asynchroniczność i buforowanie zamówień
+Zastosowanie kolejki komunikatów (`msg`) oddziela proces Klienta od procesu Kasjera. Klient po wykonaniu operacji `msgsnd()` może natychmiast opuścić system, nie czekając na zakończenie transakcji. Kasjerzy pobierają zamówienia asynchronicznie, co pozwala na płynną obsługę nawet przy chwilowych skokach obciążenia.
+
+
+
+### 5. Gwarancja czystości systemu (Garbage Collection)
+Projekt implementuje rygorystyczną politykę czyszczenia zasobów. Niezależnie od tego, czy symulacja zakończy się naturalnie, czy zostanie przerwana przez użytkownika (`SIGINT`), wywoływana jest funkcja `shmctl`, `semctl` oraz `msgctl` z flagą `IPC_RMID`. Gwarantuje to, że po zakończeniu pracy w systemie nie zostają żadne osierocone segmenty pamięci ani kolejki, co jest kluczowe dla stabilności środowiska operacyjnego.
 
 Link do repozytorium GitHub
 → https://github.com/LEGION-programmer/LEGION-programmer-SO-projekt-ciastkarnia/tree/main
