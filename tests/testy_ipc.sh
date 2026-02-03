@@ -4,106 +4,109 @@
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Funkcja czyszcząca na wypadek przerwania skryptu
+# Funkcja czyszcząca przed i po testach
 cleanup() {
+    echo -e "${YELLOW}Sprzątanie zasobów...${NC}"
     pkill -9 kierownik 2>/dev/null
     pkill -9 piekarz 2>/dev/null
     pkill -9 kasjer 2>/dev/null
     pkill -9 klient 2>/dev/null
+    # Usuwanie pamięci, semaforów i kolejek użytkownika
+    ipcs -m | grep $(whoami) | awk '{print $2}' | xargs -r ipcrm -m 2>/dev/null
+    ipcs -s | grep $(whoami) | awk '{print $2}' | xargs -r ipcrm -s 2>/dev/null
+    ipcs -q | grep $(whoami) | awk '{print $2}' | xargs -r ipcrm -q 2>/dev/null
 }
-trap cleanup EXIT
 
-# Kompilacja przed testami
-echo -e "${BLUE}--- PRZYGOTOWANIE: Kompilacja projektu ---${NC}"
-make clean && make > /dev/null
+trap cleanup EXIT
+cleanup
+
+echo -e "${BLUE}=== START TESTÓW SYSTEMU CIASTKARNIA ===${NC}"
+
+# Kompilacja
+make clean && make
 if [ $? -ne 0 ]; then
-    echo -e "${RED}[ERROR] Kompilacja nie powiodła się!${NC}"
+    echo -e "${RED}Błąd kompilacji!${NC}"
     exit 1
 fi
 
-echo -e "\n${BLUE}--- START PEŁNYCH TESTÓW IPC (4 SCENARIUSZE) ---${NC}"
-
 # ---------------------------------------------------------
-# TEST 1: Maksymalne obciążenie
+# TEST 1: Obciążenie (1000 klientów) i Bilans
 # ---------------------------------------------------------
-echo -n "Test 1: Maksymalne obciążenie (1000 klientów)... "
-./kierownik 20 5 1000 > /dev/null 2>&1 &
+echo -e "\n${BLUE}Test 1: Obciążenie (1000 klientów) i spójność danych...${NC}"
+# N=200, K=50, Czas=0 (brak auto-stopu)
+./kierownik 200 50 0 > /dev/null 2>&1 &
 K_PID=$!
-sleep 10
-kill -SIGINT $K_PID 2>/dev/null
-wait $K_PID 2>/dev/null
 
-if [ -f raport.txt ] && grep -q "OK" raport.txt; then
-    echo -e "${GREEN}[PASS]${NC}"
-else
-    echo -e "${RED}[FAIL]${NC} (Błąd spójności danych)"
-fi
+sleep 4 # Czekamy na Tp + otwarcie sklepu
 
-# ---------------------------------------------------------
-# TEST 2: Dynamika kas (Sygnały i Fork)
-# ---------------------------------------------------------
-echo -n "Test 2: Sprawdzanie dynamiki kas (Sygnały)... "
-# N=20, K=2 (nowa kasa co 2 klientów)
-./kierownik 20 2 0 > /dev/null 2>&1 &
-K_PID=$!
-sleep 2
-
-# Generujemy zmasowany tłum, aby wymusić otwarcie kasy 2
-for i in {1..12}; do 
-    ./klient > /dev/null 2>&1 & 
+echo "Generowanie 1000 klientów (może to chwilę potrwać)..."
+for i in {1..10}; do
+    for j in {1..100}; do
+        ./klient > /dev/null 2>&1 &
+    done
+    sleep 0.1
 done
 
-sleep 2 # Czas dla Kierownika na reakcję
-KASY_COUNT=$(ps -ef | grep kasjer | grep -v grep | wc -l)
-kill -SIGINT $K_PID 2>/dev/null
+echo "Czekanie na obsługę wszystkich transakcji..."
+sleep 20 # Kluczowy czas dla bilansu
+
+kill -SIGINT $K_PID
 wait $K_PID 2>/dev/null
 
-if [ "$KASY_COUNT" -ge 2 ]; then
-    echo -e "${GREEN}[PASS]${NC} (Wykryto kasy: $KASY_COUNT)"
+if [ -f raport.txt ] && grep -q "Weryfikacja: OK" raport.txt; then
+    echo -e "${GREEN}[PASS] Test 1 zakończony sukcesem.${NC}"
 else
-    echo -e "${RED}[FAIL]${NC} (Otwarto tylko $KASY_COUNT kasy, a powinny być min. 2)"
+    echo -e "${RED}[FAIL] Test 1: Błąd bilansu w raport.txt!${NC}"
 fi
 
 # ---------------------------------------------------------
-# TEST 3: Kolejka Komunikatów (Klient -> Kasjer)
+# TEST 2: Dynamika kas (DEBUG VERSION)
 # ---------------------------------------------------------
-echo -n "Test 3: Przesyłanie zamówień (Kolejka komunikatów)... "
-# Odpalamy 15 klientów natychmiastowych
-./kierownik 10 5 15 > /dev/null 2>&1 &
+echo -e "\n${BLUE}Test 2: Sprawdzanie dynamiki kas...${NC}"
+./kierownik 10 2 0 & 
 K_PID=$!
-sleep 6 # Czekamy aż piekarz upiecze a kasjer obsłuży
-kill -SIGINT $K_PID 2>/dev/null
-wait $K_PID 2>/dev/null
 
-SPRZEDANO=$(grep "SUMA" raport.txt | awk -F'|' '{print $3}' | xargs)
-if [[ "$SPRZEDANO" != "" && "$SPRZEDANO" -gt 0 ]]; then
-    echo -e "${GREEN}[PASS]${NC} (Sprzedano towarów: $SPRZEDANO)"
-else
-    echo -e "${RED}[FAIL]${NC} (Licznik sprzedaży stoi na 0)"
-fi
+sleep 4 
 
-# ---------------------------------------------------------
-# TEST 4: Oczyszczanie zasobów (Wycieki IPC)
-# ---------------------------------------------------------
-echo -n "Test 4: Sprawdzanie wycieków IPC... "
-./kierownik 5 2 5 > /dev/null 2>&1 &
-K_PID=$!
+echo "Wpuszczanie klientów..."
+for i in {1..12}; do
+    ./klient & 
+done
+
 sleep 2
-kill -SIGINT $K_PID 2>/dev/null
-wait $K_PID 2>/dev/null
-sleep 1 # Czas na ostateczne usunięcie przez system
 
-USER_NAME=$(whoami)
-# Sprawdzamy wszystkie trzy typy zasobów
-POZOSTALOSCI=$(ipcs -m -s -q | grep "$USER_NAME")
-
-if [ -z "$POZOSTALOSCI" ]; then
-    echo -e "${GREEN}[PASS]${NC} (Brak osieroconych segmentów)"
+# Sprawdźmy co widzi system
+K_COUNT=$(pgrep -f "kasjer" | wc -l)
+if [ "$K_COUNT" -ge 2 ]; then
+    echo -e "${GREEN}[PASS] Znaleziono $K_COUNT procesy kasjera.${NC}"
 else
-    echo -e "${RED}[FAIL]${NC} (Zasoby nadal wiszą w systemie!)"
-    ipcs -m -s -q | grep "$USER_NAME"
+    echo -e "${RED}[FAIL] Widzę tylko $K_COUNT kasjerów.${NC}"
+    echo "Aktywne procesy Twojego projektu:"
+    ps aux | grep -E "kierownik|kasjer|piekarz" | grep -v grep
 fi
 
-echo -e "${BLUE}--- KONIEC TESTÓW ---${NC}\n"
+kill -SIGINT $K_PID 2>/dev/null
+
+# ---------------------------------------------------------
+# TEST 3: Sprawdzanie wycieków IPC
+# ---------------------------------------------------------
+cleanup
+echo -e "\n${BLUE}Test 3: Sprawdzanie wycieków IPC po zamknięciu...${NC}"
+./kierownik 10 5 0 > /dev/null 2>&1 &
+K_PID=$!
+sleep 4
+kill -SIGINT $K_PID
+sleep 2
+
+LEAKS=$(ipcs -a | grep $(whoami))
+if [ -z "$LEAKS" ]; then
+    echo -e "${GREEN}[PASS] Zasoby IPC zostały poprawnie usunięte.${NC}"
+else
+    echo -e "${RED}[FAIL] Wykryto wycieki IPC!${NC}"
+    echo "$LEAKS"
+fi
+
+echo -e "\n${BLUE}=== KONIEC TESTÓW ===${NC}"

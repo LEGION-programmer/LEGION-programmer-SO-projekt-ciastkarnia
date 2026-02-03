@@ -1,44 +1,30 @@
 #include "ciastkarnia.h"
 
-int aktywna = 1;
-
-void obsluga_kasjera(int sig) {
-    if (sig == SIGUSR1) aktywna = 0; // Inwentaryzacja: przestań brać nowe, ale dokończ pętlę
-    else if (sig == SIGUSR2) _exit(0); // Ewakuacja: wyjdź natychmiast
-}
-
 int main(int argc, char *argv[]) {
-    if (argc < 2) exit(1);
+    int id = (argc > 1) ? atoi(argv[1]) : 1;
+    key_t k = ftok(FTOK_PATH, PROJEKT_ID);
+    int shmid = shmget(k, sizeof(shared_data_t), 0666);
+    int semid = semget(k, 2, 0666);
+    int msqid = msgget(k, 0666);
+    shared_data_t *shm = shmat(shmid, NULL, 0);
+    order_t zam;
 
-    signal(SIGUSR1, obsluga_kasjera);
-    signal(SIGUSR2, obsluga_kasjera);
-    signal(SIGINT, SIG_IGN);
+    printf("[Kasjer %d] Stanowisko otwarte.\n", id);
 
-    key_t k = ftok(".", PROJEKT_ID);
-    int msqid = msgget(k, 0);
-    int semid = semget(k, 2, 0);
-    shared_data_t *shm = shmat(shmget(k, sizeof(shared_data_t), 0), NULL, 0);
-
-    printf("[Kasa %s] Stanowisko otwarte.\n", argv[1]);
-
-    // Pętla działa dopóki kasa aktywna LUB dopóki są wiadomości w kolejce (Inwentaryzacja)
-    while (aktywna || msgrcv(msqid, NULL, 0, 1, IPC_NOWAIT | MSG_NOERROR) != -1) {
-        order_t zam;
-        // Jeśli aktywna - czekaj blokująco. Jeśli nie - bierz tylko co jest (IPC_NOWAIT).
-        if (msgrcv(msqid, &zam, sizeof(order_t)-sizeof(long), 1, aktywna ? 0 : IPC_NOWAIT) != -1) {
-            sem_op(semid, 1, -1);
-            if (shm->stan_podajnika[zam.typ] >= zam.ilosc) {
-                shm->stan_podajnika[zam.typ] -= zam.ilosc;
-                shm->sprzedano[zam.typ] += zam.ilosc;
-                printf("[Kasa %s] Sprzedano %d x %s\n", argv[1], zam.ilosc, PRODUKTY_NAZWY[zam.typ]);
-                usleep(800000);
+    while(1) {
+        if (msgrcv(msqid, &zam, MSG_SIZE, 1, 0) != -1) {
+            printf("[Kasjer %d] Obsluguje klienta %d (%d szt.)\n", id, zam.klient_pid, zam.liczba_pozycji);
+            
+            sem_op(semid, 1, -1); // LOCK
+            for(int i = 0; i < zam.liczba_pozycji; i++) {
+                int produkt_id = zam.typy[i];
+                shm->sprzedano[produkt_id]++; // AKTUALIZACJA W SHM
             }
-            sem_op(semid, 1, 1);
+            sem_op(semid, 1, 1); // UNLOCK
+            fflush(stdout);
+        } else {
+            break; 
         }
-        // stress test
-        if (aktywna) usleep(1000); 
     }
-
-    printf("[Kasa %s] Zamknieta po obsluzeniu kolejki.\n", argv[1]);
     return 0;
 }
