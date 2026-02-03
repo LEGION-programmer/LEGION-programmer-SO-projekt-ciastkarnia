@@ -1,46 +1,59 @@
 #include "ciastkarnia.h"
 
+int k_typy[10], k_ile[10], w_k = 0;
+int s_id;
+shared_data_t *sh_ptr;
+
+void ewakuacja(int sig) {
+    if (w_k > 0) {
+        sem_op(s_id, 1, -1);
+        for(int i=0; i<w_k; i++) sh_ptr->porzucono[k_typy[i]] += k_ile[i];
+        sem_op(s_id, 1, 1);
+    }
+    sem_op(s_id, 0, 1);
+    exit(0);
+}
+
 int main() {
     srand(time(NULL) ^ getpid());
     key_t k = ftok(FTOK_PATH, PROJEKT_ID);
-    int shmid = shmget(k, sizeof(shared_data_t), 0666);
-    int semid = semget(k, 2, 0666);
-    int msqid = msgget(k, 0666);
+    int sh_id = shmget(k, sizeof(shared_data_t), 0666);
+    s_id = semget(k, 2, 0666);
+    int mq = msgget(k, 0666);
+    sh_ptr = shmat(sh_id, NULL, 0);
 
-    shared_data_t *shm = shmat(shmid, NULL, 0);
+    signal(SIGUSR2, ewakuacja);
 
-    // Klient wchodzi
-    if (shm->sklep_otwarty && sem_op(semid, 0, -1) == 0) {
-        // --- KLUCZ DO TESTU 2 ---
-        // Klient musi pobyć w sklepie, żeby kolejni zdążyli wejść
-        // i stworzyć "tłok" widoczny dla Kierownika.
-        usleep(600000); 
+    if (sh_ptr->sklep_otwarty && sem_op(s_id, 0, -1) == 0) {
+        usleep(500000 + rand()%1000000); 
 
-        order_t zam;
-        memset(&zam, 0, sizeof(order_t));
-        zam.mtype = 1;
-        zam.klient_pid = getpid();
-
-        for (int i = 0; i < 2; i++) {
+        sem_op(s_id, 1, -1);
+        for(int i=0; i<3; i++) {
             int t = rand() % P_TYPY;
-            sem_op(semid, 1, -1);
-            if (shm->stan_podajnika[t] > 0) {
-                shm->stan_podajnika[t]--;
-                zam.typy[zam.liczba_pozycji] = t;
-                zam.ilosci[zam.liczba_pozycji] = 1;
-                printf("[Klient %d] Kupuję: %s\n", getpid(), PRODUKTY_NAZWY[t]);
-                zam.liczba_pozycji++;
+            if (sh_ptr->stan_podajnika[t] > 0) {
+                sh_ptr->stan_podajnika[t]--;
+                k_typy[w_k] = t; k_ile[w_k] = 1; w_k++;
             }
-            sem_op(semid, 1, 1);
         }
+        if (w_k < 2) { // Zwrot jesli za malo
+            for(int i=0; i<w_k; i++) sh_ptr->stan_podajnika[k_typy[i]]++;
+            w_k = 0;
+        }
+        sem_op(s_id, 1, 1);
 
-        if (zam.liczba_pozycji > 0) {
-            msgsnd(msqid, &zam, MSG_SIZE, 0);
+        if (w_k >= 2) {
+            order_t o; memset(&o, 0, sizeof(order_t));
+            o.mtype = 1; o.klient_pid = getpid(); o.liczba_pozycji = w_k;
+            memcpy(o.typy, k_typy, sizeof(int)*10);
+            memcpy(o.ilosci, k_ile, sizeof(int)*10);
+            msgsnd(mq, &o, MSG_SIZE, 0);
+            printf("[Klient %d] Kupil %d szt. i idzie do kasy.\n", getpid(), w_k);
+        } else {
+            printf("[Klient %d] Brak towaru, wychodzi.\n", getpid());
         }
-        
-        // Klient wychodzi, zwalnia miejsce (Semafor 0)
-        sem_op(semid, 0, 1);
+        fflush(stdout);
+        sem_op(s_id, 0, 1);
     }
-    shmdt(shm);
+    shmdt(sh_ptr);
     return 0;
 }

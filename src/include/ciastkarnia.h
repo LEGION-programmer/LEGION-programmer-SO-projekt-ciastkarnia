@@ -18,11 +18,13 @@
 #define FTOK_PATH "/tmp"
 #define P_TYPY 11
 
+// Kolory ANSI
 #define RED     "\x1b[31m"
 #define GREEN   "\x1b[32m"
 #define YELLOW  "\x1b[33m"
 #define BLUE    "\x1b[34m"
 #define MAGENTA "\x1b[35m"
+#define CYAN    "\x1b[36m"
 #define RESET   "\x1b[0m"
 
 static const char *PRODUKTY_NAZWY[] = {
@@ -41,21 +43,14 @@ typedef struct {
 typedef struct {
     long mtype;
     int klient_pid;
-    int typy[2];
-    int ilosci[2];
+    int typy[10];
+    int ilosci[10];
     int liczba_pozycji;
 } order_t;
 
 #define MSG_SIZE (sizeof(order_t) - sizeof(long))
 
-/* API wspólne */
 void handle_error(const char *msg);
 int sem_op(int semid, int sem_num, int op);
-
-union semun {
-    int val;
-    struct semid_ds *buf;
-    unsigned short *array;
-};
 
 #endif

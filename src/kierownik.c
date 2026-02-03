@@ -13,33 +13,37 @@ void raport_koncowy() {
         s_sum += shared_data->sprzedano[i];
         z_sum += shared_data->stan_podajnika[i];
         p_sum += shared_data->porzucono[i];
-        fprintf(f, "Produkt %02d | S: %d |\n", i, shared_data->sprzedano[i]);
+        fprintf(f, "Produkt %02d | S:%d | Z:%d | P:%d |\n", i, 
+                shared_data->sprzedano[i], shared_data->stan_podajnika[i], shared_data->porzucono[i]);
     }
-    fprintf(f, "Weryfikacja: %s\n", (w_sum == s_sum + z_sum + p_sum) ? "OK" : "ERR");
+    int ok = (w_sum == s_sum + z_sum + p_sum);
+    fprintf(f, "Weryfikacja: %s\n", ok ? "OK" : "ERR");
+    printf("\n" MAGENTA "=== KONIEC SYMULACJI ===" RESET "\n");
+    printf("Bilans: %s (W:%d, S+Z+P:%d)\n", ok ? GREEN"OK"RESET : RED"ERR"RESET, w_sum, s_sum+z_sum+p_sum);
     fclose(f);
 }
 
 void sprzataj(int sig) {
-    if (shared_data) shared_data->sklep_otwarty = 0;
+    (void)sig; // Ucisza warning: unused parameter
+    printf(YELLOW "\n[Kierownik] Zamykanie sklepu, prosze czekac...\n" RESET);
+    shared_data->sklep_otwarty = 0;
     if (gen_pid > 0) kill(gen_pid, SIGTERM);
-    
-    // Czekamy na opróżnienie kolejki (ważne dla Testu 1)
-    struct msqid_ds buf;
-    int limit = 0;
+
+    struct msqid_ds q_buf;
+    int timeout = 0;
     if (msgid != -1) {
         do {
-            msgctl(msgid, IPC_STAT, &buf);
-            if (buf.msg_qnum > 0) usleep(100000);
-            limit++;
-        } while (buf.msg_qnum > 0 && limit < 50);
+            msgctl(msgid, IPC_STAT, &q_buf);
+            if (q_buf.msg_qnum > 0) usleep(100000);
+        } while (q_buf.msg_qnum > 0 && timeout++ < 50);
     }
 
     if (piekarz_pid > 0) kill(piekarz_pid, SIGTERM);
-    if (kasy[0] > 0) kill(kasy[0], SIGTERM);
-    if (kasy[1] > 0) kill(kasy[1], SIGTERM);
-    while (wait(NULL) > 0);
+    for(int i=0; i<2; i++) if (kasy[i] > 0) kill(kasy[i], SIGTERM);
     
+    while (wait(NULL) > 0);
     raport_koncowy();
+    
     if (shmid != -1) { shmdt(shared_data); shmctl(shmid, IPC_RMID, NULL); }
     if (semid != -1) semctl(semid, 0, IPC_RMID);
     if (msgid != -1) msgctl(msgid, IPC_RMID, NULL);
@@ -47,9 +51,10 @@ void sprzataj(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) exit(1);
+    if (argc < 3) { printf("Uzycie: ./kierownik N K [czas]\n"); exit(1); }
     int N = atoi(argv[1]);
     int K = atoi(argv[2]);
+    int czas = (argc > 3) ? atoi(argv[3]) : 0;
 
     key_t k = ftok(FTOK_PATH, PROJEKT_ID);
     shmid = shmget(k, sizeof(shared_data_t), IPC_CREAT | 0666);
@@ -62,48 +67,35 @@ int main(int argc, char *argv[]) {
     msgid = msgget(k, IPC_CREAT | 0666);
 
     signal(SIGINT, sprzataj);
-    signal(SIGALRM, sprzataj);
+    if (czas > 0) { signal(SIGALRM, sprzataj); alarm(czas); }
 
-    // 1. Piekarz (Tp)
+    printf("[Kierownik] Start piekarni. Oczekiwanie 2s...\n");
     if ((piekarz_pid = fork()) == 0) execl("./piekarz", "piekarz", NULL);
-    
-    // 2. Czekanie 3s (Tp + 30min symulacji)
-    sleep(3); 
+    sleep(2); 
 
-    // 3. Otwarcie sklepu
     shared_data->sklep_otwarty = 1;
+    printf("[Kierownik] Sklep otwarty (N=%d, K=%d).\n", N, K);
     if ((kasy[0] = fork()) == 0) execl("./kasjer", "kasjer", "1", NULL);
 
-    // 4. Generator (do testów ręcznych)
     if ((gen_pid = fork()) == 0) {
         while(1) {
             if (fork() == 0) { execl("./klient", "klient", NULL); exit(0); }
-            usleep(500000);
+            usleep(300000);
+            while(waitpid(-1, NULL, WNOHANG) > 0);
         }
     }
 
-    // --- LOGIKA DYNAMIKI KAS (KLUCZ DO TESTU 2) ---
-    
     while(1) {
-        int wolne = semctl(semid, 0, GETVAL);
-        if (wolne == -1) break;
-        int w_srodku = N - wolne;
-
+        int w_srodku = N - semctl(semid, 0, GETVAL);
         if (w_srodku >= K && kasy[1] == 0) {
-            kasy[1] = fork();
-            if (kasy[1] == 0) {
-                // Upewnij się, że ścieżka "./kasjer" jest poprawna względem miejsca odpalenia kierownika
-                execl("./kasjer", "kasjer", "2", NULL);
-                
-                // Jeśli execl zawiedzie, wypisze błąd:
-                perror("BŁĄD EXECL KASJER 2");
-                _exit(1); 
-            }
-            // Wypisz to dokładnie tak, żebyś widział w konsoli podczas testu
-            printf("[Kierownik] PRÓBA OTWARCIA KASY 2 (Klienci: %d)\n", w_srodku);
-            fflush(stdout);
-            usleep(200000); // Daj systemowi czas na stworzenie procesu
+            printf(CYAN "[Kierownik] Tlok (%d klientow). Otwieram druga kase.\n" RESET, w_srodku);
+            if ((kasy[1] = fork()) == 0) execl("./kasjer", "kasjer", "2", NULL);
+        } else if (w_srodku < K && kasy[1] > 0) {
+            printf(CYAN "[Kierownik] Luzniej (%d klientow). Zamykam druga kase.\n" RESET, w_srodku);
+            kill(kasy[1], SIGUSR1);
+            kasy[1] = 0;
         }
+        usleep(500000);
     }
     return 0;
 }

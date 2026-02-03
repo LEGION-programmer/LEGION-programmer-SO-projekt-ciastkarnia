@@ -1,30 +1,29 @@
 #include "ciastkarnia.h"
 
 int main() {
-    srand(time(NULL) ^ getpid());
+    srand(time(NULL));
     key_t k = ftok(FTOK_PATH, PROJEKT_ID);
-    int shmid = shmget(k, sizeof(shared_data_t), 0666);
-    int semid = semget(k, 2, 0666);
-    shared_data_t *shm = shmat(shmid, NULL, 0);
-
-    printf("[Piekarz] Rozpoczynam wypieki (produkcja seryjna)!\n");
+    int sh_id = shmget(k, sizeof(shared_data_t), 0666);
+    int s_id = semget(k, 2, 0666);
+    shared_data_t *sh = shmat(sh_id, NULL, 0);
 
     while(1) {
-        sem_op(semid, 1, -1); // Lock podajnika
-        
-        printf("[Piekarz] Wyjmuję z pieca: ");
-        for (int i = 0; i < P_TYPY; i++) {
-            int ilosc = (rand() % 5) + 1; // Losowo 1-5 sztuk każdego typu
-            shm->stan_podajnika[i] += ilosc;
-            shm->wytworzono[i] += ilosc;
-            if (i < 3) printf("%s (+%d) ", PRODUKTY_NAZWY[i], ilosc);
+        sleep(2);
+        sem_op(s_id, 1, -1);
+        int dowieziono = 0;
+        for(int i=0; i<P_TYPY; i++) {
+            if (sh->stan_podajnika[i] < 20) {
+                int ile = 1 + rand()%3;
+                sh->stan_podajnika[i] += ile;
+                sh->wytworzono[i] += ile;
+                dowieziono++;
+            }
         }
-        printf("... i inne.\n");
-        
-        sem_op(semid, 1, 1); // Unlock
-        
-        // Odstęp między pieczeniem kolejnej partii
-        sleep(2); 
+        sem_op(s_id, 1, 1);
+        if (dowieziono) {
+            printf("[Piekarz] Dostawa na podajniki.\n");
+            fflush(stdout);
+        }
     }
     return 0;
 }

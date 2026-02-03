@@ -1,30 +1,33 @@
 #include "ciastkarnia.h"
 
+volatile sig_atomic_t stop = 0;
+void h_stop(int s) { stop = 1; }
+
 int main(int argc, char *argv[]) {
     int id = (argc > 1) ? atoi(argv[1]) : 1;
     key_t k = ftok(FTOK_PATH, PROJEKT_ID);
-    int shmid = shmget(k, sizeof(shared_data_t), 0666);
-    int semid = semget(k, 2, 0666);
-    int msqid = msgget(k, 0666);
-    shared_data_t *shm = shmat(shmid, NULL, 0);
-    order_t zam;
+    int sh_id = shmget(k, sizeof(shared_data_t), 0666);
+    int s_id = semget(k, 2, 0666);
+    int mq = msgget(k, 0666);
+    shared_data_t *sh = shmat(sh_id, NULL, 0);
+    order_t z;
 
+    signal(SIGUSR1, h_stop);
     printf("[Kasjer %d] Stanowisko otwarte.\n", id);
+    fflush(stdout);
 
     while(1) {
-        if (msgrcv(msqid, &zam, MSG_SIZE, 1, 0) != -1) {
-            printf("[Kasjer %d] Obsluguje klienta %d (%d szt.)\n", id, zam.klient_pid, zam.liczba_pozycji);
-            
-            sem_op(semid, 1, -1); // LOCK
-            for(int i = 0; i < zam.liczba_pozycji; i++) {
-                int produkt_id = zam.typy[i];
-                shm->sprzedano[produkt_id]++; // AKTUALIZACJA W SHM
-            }
-            sem_op(semid, 1, 1); // UNLOCK
+        if (msgrcv(mq, &z, MSG_SIZE, 1, stop ? IPC_NOWAIT : 0) != -1) {
+            printf(GREEN "[Kasjer %d] Obsluguje klienta %d\n" RESET, id, z.klient_pid);
             fflush(stdout);
+            sem_op(s_id, 1, -1);
+            for(int i=0; i<z.liczba_pozycji; i++) sh->sprzedano[z.typy[i]] += z.ilosci[i];
+            sem_op(s_id, 1, 1);
         } else {
-            break; 
+            if (stop || errno == ENOMSG) break;
         }
     }
+    printf("[Kasjer %d] Stanowisko zamkniete.\n", id);
+    fflush(stdout);
     return 0;
 }
