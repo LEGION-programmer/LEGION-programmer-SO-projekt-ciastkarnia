@@ -1,12 +1,12 @@
-Produkt 00 | S:0 | Z:4 | P:0 |
-Produkt 01 | S:2 | Z:2 | P:0 |
-Produkt 02 | S:1 | Z:4 | P:0 |
-Produkt 03 | S:2 | Z:3 | P:0 |
-Produkt 04 | S:1 | Z:4 | P:0 |
-Produkt 05 | S:0 | Z:5 | P:0 |
-Produkt 06 | S:2 | Z:2 | P:0 |
-Produkt 07 | S:0 | Z:4 | P:0 |
-Produkt 08 | S:0 | Z:3 | P:0 |
-Produkt 09 | S:0 | Z:4 | P:0 |
-Produkt 10 | S:1 | Z:3 | P:0 |
+Produkt 00 | S:7 | Z:1 | P:0 |
+Produkt 01 | S:8 | Z:1 | P:0 |
+Produkt 02 | S:7 | Z:3 | P:0 |
+Produkt 03 | S:7 | Z:3 | P:0 |
+Produkt 04 | S:11 | Z:1 | P:0 |
+Produkt 05 | S:6 | Z:3 | P:0 |
+Produkt 06 | S:5 | Z:4 | P:0 |
+Produkt 07 | S:8 | Z:1 | P:0 |
+Produkt 08 | S:7 | Z:1 | P:0 |
+Produkt 09 | S:4 | Z:6 | P:0 |
+Produkt 10 | S:9 | Z:0 | P:0 |
 Weryfikacja: OK

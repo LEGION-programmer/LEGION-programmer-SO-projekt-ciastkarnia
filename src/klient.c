@@ -4,14 +4,15 @@ int k_typy[10], k_ile[10], w_k = 0;
 int s_id;
 shared_data_t *sh_ptr;
 
-void ewakuacja(int sig) {
+void handle_ewakuacja(int sig) {
+    (void)sig;
     if (w_k > 0) {
         sem_op(s_id, 1, -1);
         for(int i=0; i<w_k; i++) sh_ptr->porzucono[k_typy[i]] += k_ile[i];
         sem_op(s_id, 1, 1);
     }
     sem_op(s_id, 0, 1);
-    exit(0);
+    _exit(0); // Uzywamy _exit zamiast exit w handlerze
 }
 
 int main() {
@@ -22,10 +23,14 @@ int main() {
     int mq = msgget(k, 0666);
     sh_ptr = shmat(sh_id, NULL, 0);
 
-    signal(SIGUSR2, ewakuacja);
+    struct sigaction sa;
+    sa.sa_handler = handle_ewakuacja;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGUSR2, &sa, NULL);
 
     if (sh_ptr->sklep_otwarty && sem_op(s_id, 0, -1) == 0) {
-        usleep(500000 + rand()%1000000); 
+        usleep(500000 + rand()%500000); 
 
         sem_op(s_id, 1, -1);
         for(int i=0; i<3; i++) {
@@ -35,7 +40,7 @@ int main() {
                 k_typy[w_k] = t; k_ile[w_k] = 1; w_k++;
             }
         }
-        if (w_k < 2) { // Zwrot jesli za malo
+        if (w_k < 2) {
             for(int i=0; i<w_k; i++) sh_ptr->stan_podajnika[k_typy[i]]++;
             w_k = 0;
         }
@@ -47,11 +52,7 @@ int main() {
             memcpy(o.typy, k_typy, sizeof(int)*10);
             memcpy(o.ilosci, k_ile, sizeof(int)*10);
             msgsnd(mq, &o, MSG_SIZE, 0);
-            printf("[Klient %d] Kupil %d szt. i idzie do kasy.\n", getpid(), w_k);
-        } else {
-            printf("[Klient %d] Brak towaru, wychodzi.\n", getpid());
         }
-        fflush(stdout);
         sem_op(s_id, 0, 1);
     }
     shmdt(sh_ptr);

@@ -110,3 +110,35 @@ else
 fi
 
 echo -e "\n${BLUE}=== KONIEC TESTÓW ===${NC}"
+
+# ---------------------------------------------------------
+# TEST 4: Ewakuacja (SIGUSR2)
+# ---------------------------------------------------------
+echo -e "\n${BLUE}Test 4: Sprawdzanie procedury ewakuacji (SIGUSR2)...${NC}"
+./kierownik 50 25 0 > /dev/null 2>&1 &
+K_PID=$!
+sleep 2
+
+echo "Wpuszczanie 40 klientów..."
+for i in {1..40}; do
+    ./klient > /dev/null 2>&1 &
+done
+sleep 1
+
+echo -e "${RED}Wysyłanie sygnału EWAKUACJI do $K_PID...${NC}"
+kill -USR2 $K_PID
+sleep 2
+
+# Wywolujemy raport
+kill -INT $K_PID
+sleep 2
+
+if [ -f raport.txt ]; then
+    PORZUCONO=$(grep "P:" raport.txt | awk -F'P:' '{sum+=$2} END {print sum}' | tr -d ' |')
+    if [ "$PORZUCONO" -gt 0 ]; then
+        echo -e "${GREEN}[PASS] Produkty porzucone: $PORZUCONO${NC}"
+    else
+        echo -e "${RED}[FAIL] Brak porzuconych produktow w raporcie!${NC}"
+    fi
+    grep "Weryfikacja: OK" raport.txt > /dev/null && echo -e "${GREEN}[PASS] Bilans OK${NC}" || echo -e "${RED}[FAIL] Bilans ERR${NC}"
+fi

@@ -18,24 +18,24 @@ void raport_koncowy() {
     }
     int ok = (w_sum == s_sum + z_sum + p_sum);
     fprintf(f, "Weryfikacja: %s\n", ok ? "OK" : "ERR");
-    printf("\n" MAGENTA "=== KONIEC SYMULACJI ===" RESET "\n");
+    printf("\n" MAGENTA "=== RAPORT KONCOWY ===" RESET "\n");
     printf("Bilans: %s (W:%d, S+Z+P:%d)\n", ok ? GREEN"OK"RESET : RED"ERR"RESET, w_sum, s_sum+z_sum+p_sum);
     fclose(f);
 }
 
 void sprzataj(int sig) {
-    (void)sig; // Ucisza warning: unused parameter
-    printf(YELLOW "\n[Kierownik] Zamykanie sklepu, prosze czekac...\n" RESET);
+    (void)sig;
     shared_data->sklep_otwarty = 0;
     if (gen_pid > 0) kill(gen_pid, SIGTERM);
 
+    // Dajemy kasjerom chwile na dokonczenie zamówień z kolejki
     struct msqid_ds q_buf;
     int timeout = 0;
     if (msgid != -1) {
         do {
             msgctl(msgid, IPC_STAT, &q_buf);
             if (q_buf.msg_qnum > 0) usleep(100000);
-        } while (q_buf.msg_qnum > 0 && timeout++ < 50);
+        } while (q_buf.msg_qnum > 0 && timeout++ < 20);
     }
 
     if (piekarz_pid > 0) kill(piekarz_pid, SIGTERM);
@@ -50,11 +50,32 @@ void sprzataj(int sig) {
     exit(0);
 }
 
+void wywolaj_ewakuacje(int sig) {
+    (void)sig;
+    // BLOKADA: Kierownik musi zablokować USR2 dla siebie, 
+    // inaczej kill(0,...) zabije go zanim skończy funkcję.
+    sigset_t mask, oldmask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR2);
+    sigprocmask(SIG_BLOCK, &mask, &oldmask);
+
+    printf(RED "\n[Kierownik] Rozsylam sygnal EWAKUACJI do grupy...\n" RESET);
+    fflush(stdout);
+    
+    kill(0, SIGUSR2); 
+    
+    // Odblokowanie po wysłaniu
+    sigprocmask(SIG_SETMASK, &oldmask, NULL);
+}
+
 int main(int argc, char *argv[]) {
-    if (argc < 3) { printf("Uzycie: ./kierownik N K [czas]\n"); exit(1); }
+    if (argc < 3) exit(1);
     int N = atoi(argv[1]);
     int K = atoi(argv[2]);
     int czas = (argc > 3) ? atoi(argv[3]) : 0;
+
+    // Ustawienie grupy procesów (Kluczowe dla poprawnego kill(0,...))
+    setpgid(0, 0);
 
     key_t k = ftok(FTOK_PATH, PROJEKT_ID);
     shmid = shmget(k, sizeof(shared_data_t), IPC_CREAT | 0666);
@@ -66,21 +87,32 @@ int main(int argc, char *argv[]) {
     semctl(semid, 1, SETVAL, 1);
     msgid = msgget(k, IPC_CREAT | 0666);
 
-    signal(SIGINT, sprzataj);
-    if (czas > 0) { signal(SIGALRM, sprzataj); alarm(czas); }
+    // Obsługa sygnałów przez sigaction (bezpieczniejsze niż signal)
+    struct sigaction sa;
+    sa.sa_handler = sprzataj;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGALRM, &sa, NULL);
 
-    printf("[Kierownik] Start piekarni. Oczekiwanie 2s...\n");
+    struct sigaction sa_ewak;
+    sa_ewak.sa_handler = wywolaj_ewakuacje;
+    sigemptyset(&sa_ewak.sa_mask);
+    sa_ewak.sa_flags = SA_RESTART;
+    sigaction(SIGUSR2, &sa_ewak, NULL);
+
+    if (czas > 0) alarm(czas);
+
     if ((piekarz_pid = fork()) == 0) execl("./piekarz", "piekarz", NULL);
-    sleep(2); 
+    sleep(1); 
 
     shared_data->sklep_otwarty = 1;
-    printf("[Kierownik] Sklep otwarty (N=%d, K=%d).\n", N, K);
     if ((kasy[0] = fork()) == 0) execl("./kasjer", "kasjer", "1", NULL);
 
     if ((gen_pid = fork()) == 0) {
         while(1) {
             if (fork() == 0) { execl("./klient", "klient", NULL); exit(0); }
-            usleep(300000);
+            usleep(200000);
             while(waitpid(-1, NULL, WNOHANG) > 0);
         }
     }
@@ -88,14 +120,12 @@ int main(int argc, char *argv[]) {
     while(1) {
         int w_srodku = N - semctl(semid, 0, GETVAL);
         if (w_srodku >= K && kasy[1] == 0) {
-            printf(CYAN "[Kierownik] Tlok (%d klientow). Otwieram druga kase.\n" RESET, w_srodku);
             if ((kasy[1] = fork()) == 0) execl("./kasjer", "kasjer", "2", NULL);
         } else if (w_srodku < K && kasy[1] > 0) {
-            printf(CYAN "[Kierownik] Luzniej (%d klientow). Zamykam druga kase.\n" RESET, w_srodku);
             kill(kasy[1], SIGUSR1);
             kasy[1] = 0;
         }
-        usleep(500000);
+        usleep(400000);
     }
     return 0;
 }
