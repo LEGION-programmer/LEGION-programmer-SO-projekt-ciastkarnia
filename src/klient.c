@@ -1,60 +1,42 @@
 #include "ciastkarnia.h"
 
-int k_typy[10], k_ile[10], w_k = 0;
-int s_id;
-shared_data_t *sh_ptr;
-
-void handle_ewakuacja(int sig) {
-    (void)sig;
-    if (w_k > 0) {
-        sem_op(s_id, 1, -1);
-        for(int i=0; i<w_k; i++) sh_ptr->porzucono[k_typy[i]] += k_ile[i];
-        sem_op(s_id, 1, 1);
-    }
-    sem_op(s_id, 0, 1);
-    _exit(0); // Uzywamy _exit zamiast exit w handlerze
-}
-
 int main() {
-    srand(time(NULL) ^ getpid());
-    key_t k = ftok(FTOK_PATH, PROJEKT_ID);
-    int sh_id = shmget(k, sizeof(shared_data_t), 0666);
-    s_id = semget(k, 2, 0666);
-    int mq = msgget(k, 0666);
-    sh_ptr = shmat(sh_id, NULL, 0);
+    srand(getpid() ^ time(NULL));
+    key_t key = ftok(".", PROJECT_ID);
+    int semid = semget(key, 5, 0666);
+    int shmid = shmget(key, sizeof(shared_data_t), 0666);
+    int msgid = msgget(key, 0666);
+    shared_data_t *data = shmat(shmid, NULL, 0);
 
-    struct sigaction sa;
-    sa.sa_handler = handle_ewakuacja;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGUSR2, &sa, NULL);
+    // Czekaj na wejście do sklepu
+    sem_op(semid, 1, -1); 
 
-    if (sh_ptr->sklep_otwarty && sem_op(s_id, 0, -1) == 0) {
-        usleep(500000 + rand()%500000); 
-
-        sem_op(s_id, 1, -1);
-        for(int i=0; i<3; i++) {
-            int t = rand() % P_TYPY;
-            if (sh_ptr->stan_podajnika[t] > 0) {
-                sh_ptr->stan_podajnika[t]--;
-                k_typy[w_k] = t; k_ile[w_k] = 1; w_k++;
-            }
+    sem_op(semid, 0, -1);
+    data->klienci_lacznie++;
+    
+    int suma_zakupow = 0;
+    for (int t = 0; t < P_TYPY; t++) {
+        int ile_chce = rand() % 3; // Chce 0, 1 lub 2 sztuki danego typu
+        if (data->stan_podajnika[t] >= ile_chce) {
+            data->stan_podajnika[t] -= ile_chce;
+            suma_zakupow += ile_chce;
+        } else {
+            // Bierze ile zostało, reszta to porzucone zamówienie
+            suma_zakupow += data->stan_podajnika[t];
+            data->stan_podajnika[t] = 0;
+            data->porzucone_zamowienia++;
         }
-        if (w_k < 2) {
-            for(int i=0; i<w_k; i++) sh_ptr->stan_podajnika[k_typy[i]]++;
-            w_k = 0;
-        }
-        sem_op(s_id, 1, 1);
-
-        if (w_k >= 2) {
-            order_t o; memset(&o, 0, sizeof(order_t));
-            o.mtype = 1; o.klient_pid = getpid(); o.liczba_pozycji = w_k;
-            memcpy(o.typy, k_typy, sizeof(int)*10);
-            memcpy(o.ilosci, k_ile, sizeof(int)*10);
-            msgsnd(mq, &o, MSG_SIZE, 0);
-        }
-        sem_op(s_id, 0, 1);
     }
-    shmdt(sh_ptr);
+    sem_op(semid, 0, 1);
+
+    if (suma_zakupow > 0) {
+        msg_t msg = {1, suma_zakupow};
+        msgsnd(msgid, &msg, sizeof(msg_t) - sizeof(long), 0);
+    }
+
+    // Wyjdź ze sklepu
+    sem_op(semid, 1, 1); 
+
+    shmdt(data);
     return 0;
 }

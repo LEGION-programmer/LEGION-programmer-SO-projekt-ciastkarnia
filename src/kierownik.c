@@ -1,131 +1,89 @@
 #include "ciastkarnia.h"
+#include <sys/wait.h>
 
-pid_t piekarz_pid = 0, kasy[2] = {0, 0}, gen_pid = 0;
-int shmid = -1, semid = -1, msgid = -1;
-shared_data_t *shared_data = NULL;
+int m_id = -1, s_id = -1, sh_id = -1;
+pid_t p_pid = 0, k1_pid = 0, k2_pid = 0;
 
-void raport_koncowy() {
-    FILE *f = fopen("raport.txt", "w");
-    if (!f) return;
-    int w_sum = 0, s_sum = 0, z_sum = 0, p_sum = 0;
-    for (int i = 0; i < P_TYPY; i++) {
-        w_sum += shared_data->wytworzono[i];
-        s_sum += shared_data->sprzedano[i];
-        z_sum += shared_data->stan_podajnika[i];
-        p_sum += shared_data->porzucono[i];
-        fprintf(f, "Produkt %02d | S:%d | Z:%d | P:%d |\n", i, 
-                shared_data->sprzedano[i], shared_data->stan_podajnika[i], shared_data->porzucono[i]);
-    }
-    int ok = (w_sum == s_sum + z_sum + p_sum);
-    fprintf(f, "Weryfikacja: %s\n", ok ? "OK" : "ERR");
-    printf("\n" MAGENTA "=== RAPORT KONCOWY ===" RESET "\n");
-    printf("Bilans: %s (W:%d, S+Z+P:%d)\n", ok ? GREEN"OK"RESET : RED"ERR"RESET, w_sum, s_sum+z_sum+p_sum);
-    fclose(f);
-}
-
-void sprzataj(int sig) {
+void sprzatacz(int sig) {
     (void)sig;
-    shared_data->sklep_otwarty = 0;
-    if (gen_pid > 0) kill(gen_pid, SIGTERM);
-
-    // Dajemy kasjerom chwile na dokonczenie zamówień z kolejki
-    struct msqid_ds q_buf;
-    int timeout = 0;
-    if (msgid != -1) {
-        do {
-            msgctl(msgid, IPC_STAT, &q_buf);
-            if (q_buf.msg_qnum > 0) usleep(100000);
-        } while (q_buf.msg_qnum > 0 && timeout++ < 20);
+    signal(SIGINT, SIG_IGN);
+    shared_data_t *dane = shmat(sh_id, NULL, 0);
+    
+    printf("\n%s==========================================%s\n", YELLOW, RESET);
+    printf("%s       RAPORT KOŃCOWY PIEKARNI          %s\n", BOLD, RESET);
+    printf("%s==========================================%s\n", YELLOW, RESET);
+    if (dane != (void*)-1) {
+        printf(" Obsłużeni klienci:      %d / 5000\n", dane->klienci_lacznie);
+        printf(" Sprzedane ciastka:      %d\n", dane->sprzedane_ciastka);
+        printf(" Porzucone zamówienia:   %d\n", dane->porzucone_zamowienia);
+        printf(" Wyprodukowane łącznie:  %d\n", dane->wyprodukowane_lacznie);
+        if (dane->klienci_lacznie > 0)
+            printf(" Średnia ciastek/klient: %.2f\n", (float)dane->sprzedane_ciastka / dane->klienci_lacznie);
     }
-
-    if (piekarz_pid > 0) kill(piekarz_pid, SIGTERM);
-    for(int i=0; i<2; i++) if (kasy[i] > 0) kill(kasy[i], SIGTERM);
     
-    while (wait(NULL) > 0);
-    raport_koncowy();
+    msgctl(m_id, IPC_RMID, NULL);
+    semctl(s_id, 0, IPC_RMID);
+    shmctl(sh_id, IPC_RMID, NULL);
     
-    if (shmid != -1) { shmdt(shared_data); shmctl(shmid, IPC_RMID, NULL); }
-    if (semid != -1) semctl(semid, 0, IPC_RMID);
-    if (msgid != -1) msgctl(msgid, IPC_RMID, NULL);
+    kill(0, SIGKILL);
     exit(0);
-}
-
-void wywolaj_ewakuacje(int sig) {
-    (void)sig;
-    // BLOKADA: Kierownik musi zablokować USR2 dla siebie, 
-    // inaczej kill(0,...) zabije go zanim skończy funkcję.
-    sigset_t mask, oldmask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGUSR2);
-    sigprocmask(SIG_BLOCK, &mask, &oldmask);
-
-    printf(RED "\n[Kierownik] Rozsylam sygnal EWAKUACJI do grupy...\n" RESET);
-    fflush(stdout);
-    
-    kill(0, SIGUSR2); 
-    
-    // Odblokowanie po wysłaniu
-    sigprocmask(SIG_SETMASK, &oldmask, NULL);
 }
 
 int main(int argc, char *argv[]) {
     if (argc < 3) exit(1);
-    int N = atoi(argv[1]);
-    int K = atoi(argv[2]);
-    int czas = (argc > 3) ? atoi(argv[3]) : 0;
+    int max_poj = atoi(argv[1]);
+    int prog_kasy = atoi(argv[2]);
 
-    // Ustawienie grupy procesów (Kluczowe dla poprawnego kill(0,...))
-    setpgid(0, 0);
+    signal(SIGINT, sprzatacz);
+    signal(SIGTERM, sprzatacz);
 
-    key_t k = ftok(FTOK_PATH, PROJEKT_ID);
-    shmid = shmget(k, sizeof(shared_data_t), IPC_CREAT | 0666);
-    shared_data = (shared_data_t *)shmat(shmid, NULL, 0);
-    memset(shared_data, 0, sizeof(shared_data_t));
+    key_t klucz = ftok(".", PROJECT_ID);
+    m_id = msgget(klucz, IPC_CREAT | 0666);
+    s_id = semget(klucz, 5, IPC_CREAT | 0666);
+    sh_id = shmget(klucz, sizeof(shared_data_t), IPC_CREAT | 0666);
+    
+    struct msqid_ds q_ds;
+    msgctl(m_id, IPC_STAT, &q_ds);
+    q_ds.msg_qbytes = 65536; 
+    msgctl(m_id, IPC_SET, &q_ds);
 
-    semid = semget(k, 2, IPC_CREAT | 0666);
-    semctl(semid, 0, SETVAL, N);
-    semctl(semid, 1, SETVAL, 1);
-    msgid = msgget(k, IPC_CREAT | 0666);
+    semctl(s_id, 0, SETVAL, 1);       
+    semctl(s_id, 1, SETVAL, max_poj); 
 
-    // Obsługa sygnałów przez sigaction (bezpieczniejsze niż signal)
-    struct sigaction sa;
-    sa.sa_handler = sprzataj;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGALRM, &sa, NULL);
+    shared_data_t *dane = shmat(sh_id, NULL, 0);
+    memset(dane, 0, sizeof(shared_data_t));
 
-    struct sigaction sa_ewak;
-    sa_ewak.sa_handler = wywolaj_ewakuacje;
-    sigemptyset(&sa_ewak.sa_mask);
-    sa_ewak.sa_flags = SA_RESTART;
-    sigaction(SIGUSR2, &sa_ewak, NULL);
+    if((p_pid = fork()) == 0) execl("./piekarz", "./piekarz", NULL);
+    if((k1_pid = fork()) == 0) execl("./kasjer", "./kasjer", "1", NULL);
 
-    if (czas > 0) alarm(czas);
+    sleep(3);
 
-    if ((piekarz_pid = fork()) == 0) execl("./piekarz", "piekarz", NULL);
-    sleep(1); 
-
-    shared_data->sklep_otwarty = 1;
-    if ((kasy[0] = fork()) == 0) execl("./kasjer", "kasjer", "1", NULL);
-
-    if ((gen_pid = fork()) == 0) {
-        while(1) {
-            if (fork() == 0) { execl("./klient", "klient", NULL); exit(0); }
-            usleep(200000);
-            while(waitpid(-1, NULL, WNOHANG) > 0);
-        }
-    }
-
+    int puste_cykle = 0;
     while(1) {
-        int w_srodku = N - semctl(semid, 0, GETVAL);
-        if (w_srodku >= K && kasy[1] == 0) {
-            if ((kasy[1] = fork()) == 0) execl("./kasjer", "kasjer", "2", NULL);
-        } else if (w_srodku < K && kasy[1] > 0) {
-            kill(kasy[1], SIGUSR1);
-            kasy[1] = 0;
+        struct msqid_ds buf;
+        msgctl(m_id, IPC_STAT, &buf);
+        int q = buf.msg_qnum;
+        int w_srodku = max_poj - semctl(s_id, 1, GETVAL);
+
+        if (q > prog_kasy && k2_pid == 0) {
+            if((k2_pid = fork()) == 0) execl("./kasjer", "./kasjer", "2", NULL);
+        } else if (q <= (prog_kasy/2) && k2_pid != 0) {
+            kill(k2_pid, SIGTERM);
+            waitpid(k2_pid, NULL, 0);
+            k2_pid = 0;
         }
-        usleep(400000);
+
+        printf("\r[Kierownik] Sklep: %d/%d | Kolejka kasy: %d | Sprzedane: %d", 
+               w_srodku, max_poj, q, dane->sprzedane_ciastka);
+        fflush(stdout);
+
+        if (w_srodku == 0 && q == 0 && dane->klienci_lacznie >= 5000) {
+            puste_cykle++;
+            if (puste_cykle > 30) sprzatacz(SIGINT);
+        } else {
+            puste_cykle = 0;
+        }
+        usleep(200000);
     }
     return 0;
 }
