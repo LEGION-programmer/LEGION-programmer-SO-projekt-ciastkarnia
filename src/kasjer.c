@@ -14,7 +14,7 @@ int main() {
             break;
         }
 
-        usleep(10000); 
+        sleep(1); 
         sem_op(semid, 0, -1); // MUTEX chroniący shared memory przed wyścigiem kasjerów
         data->sprzedane_ciastka += zam.laczna_liczba_ciastek;
         sem_op(semid, 0, 1);

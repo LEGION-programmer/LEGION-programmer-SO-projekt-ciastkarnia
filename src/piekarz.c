@@ -7,7 +7,7 @@ int main() {
     shared_data_t *data = shmat(shmid, NULL, 0);
 
     while(1) {
-        usleep(30000); // Bardzo szybki piekarz dla wielu produktów
+        usleep(30000); // domyslnie 30000 zwiekszyc dla testu awarii pieca np. 300000000
         int t = rand() % P_TYPY;
         sem_op(semid, 0, -1);
         data->stan_podajnika[t] += 100; // Hurtowe ilości

@@ -59,10 +59,10 @@ Celem projektu było stworzenie stabilnego, zdecentralizowanego środowiska wiel
 
 | ID | Test | Opis | Status |
 | :--- | :--- | :--- | :--- |
-| **T01** | **Stress Test** | 1000 klientów. Sprawdzenie spójności matematycznej raportu. | **PASS** |
-| **T02** | **Skalowanie** | Wymuszenie tłumu ($>K$). Sprawdzenie czy Kierownik otworzy drugą kasę. | **PASS** |
-| **T03** | **IPC Leaks** | Sprawdzenie narzędziem `ipcs` czy jądro jest czyste po zamknięciu. | **PASS** |
-| **T04** | **Ewakuacja** | Wysłanie `SIGUSR2` do grupy i weryfikacja licznika `porzucono`. | **PASS** |
+| **T01** | **Stress Test** | 5000 klientów. Weryfikacja spójności danych w pamięci współdzielonej (shm) przy ekstremalnym obciążeniu. Sprawdzenie, czy suma sprzedanych i porzuconych ciastek zgadza się z produkcją. Uruchomić ./tests/test_5000_klientow.sh | **PASS** |
+| **T02** | **Awaria pieca** | Symulacja braku towaru poprzez wstrzymanie produkcji Piekarza. Testuje poprawność inkrementacji licznika porzucone_zamowienia oraz zachowanie procesów Klientów przy pustych podajnikach. Przed testem zwiększyć usleep w ./src/piekarz.c, uruchomić ./tests/test_awaria_pieca.sh | **PASS** |
+| **T03** | **bottleneck** | Ograniczenie pojemności sklepu (Semafor wejściowy). Weryfikacja mechanizmu blokowania procesów klientów przed wejściem (kolejka systemowa) oraz płynności rotacji przy małym limicie miejsc. Dla lepszego efektu odkomentowac wszystkie usleep w ./src/klient.c. Uruchimić ./tests/test_bottleneck.sh | **PASS** |
+| **T04** | **Wyprzedaz** | Test przepustowości IPC. Wysłanie fali 300 klientów przy aktywnych dwóch kasach. Weryfikacja mechanizmu asynchronicznej kolejki komunikatów (Message Queue) jako bufora między klientem a kasjerem. Uruchomić ./tests/test_wyprzedaz.sh | **PASS** |
 
 
 ## 4. Analiza Rozwiązań i Testów
